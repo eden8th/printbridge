@@ -65,15 +65,40 @@ const PRESET_COLORS = [
   { c: '#388E3C', n: '绿' }, { c: '#1976D2', n: '蓝' }, { c: '#7B1FA2', n: '紫' },
   { c: '#795548', n: '棕' },
 ]
-const selectedColorName = computed(() =>
-  PRESET_COLORS.find((c) => c.c.toLowerCase() === (color.value || '').toLowerCase())?.n || '自定义')
+const selectedColorName = computed(() => {
+  const c = (color.value || '').toLowerCase()
+  const p = PRESET_COLORS.find((x) => x.c.toLowerCase() === c)
+  if (p) return p.n
+  const s = cfsSlots.value.find((x) => x.color.toLowerCase() === c)
+  return s ? `CFS ${s.box}-${s.index}` : '自定义'
+})
+
+// CFS 料道(真实颜色/材质,SSH 只读读取)
+const cfsSlots = computed(() => {
+  const out = []
+  for (const b of cfsInfo.value?.boxes || []) {
+    (b.slots || []).forEach((s, i) => {
+      if (s.color) out.push({ ...s, index: s.index || i + 1, box: b.box })
+    })
+  }
+  return out
+})
+
+function pickCfsSlot(s) {
+  color.value = s.color
+  const f = filaments.value.find((x) =>
+    (x.type || '').toUpperCase().includes((s.material || '').toUpperCase()))
+  if (f) filamentId.value = f.id
+}
 
 const colorHint = computed(() => {
+  if (cfsSlots.value.length)
+    return '✅ 已读取 CFS 料道(真实颜色):点击料道自动匹配耗材;开始打印前请确认打印机当前供料料道一致'
   if (!cfsInfo.value || cfsInfo.value.available === false)
-    return '切片配色写入 G-code;实际供料由打印机当前装料决定'
+    return '常见耗材预设色;切片配色写入 G-code,实际供料由打印机当前装料决定'
   if (cfsInfo.value.connected)
-    return '⚠️ CFS 机型:打印将使用打印机当前料道的耗材;若与所选颜色不符,请先在打印机端切换料道(料道颜色自动匹配即将上线)'
-  return '检测到 CFS 能力但未读到料道装料(RFID 未识别或料盒未上电);打印将使用当前装料料道'
+    return 'CFS 已连接,但未读到料道明细(需在打印机编辑里配置 SSH 密码)'
+  return '检测到 CFS 能力但未读到料道装料;打印将使用打印机当前装料料道'
 })
 
 // 从模型版本名自动推断喷嘴/材质(如 "0.2mm喷嘴, 0.06mm层高")
@@ -279,6 +304,16 @@ async function importOnly() {
       <van-field label="打印颜色" readonly>
         <template #input>
           <div class="pb-colors">
+            <template v-if="cfsSlots.length">
+              <span v-for="s in cfsSlots" :key="s.box + s.slot"
+                    class="pb-dot" :class="{ active: color.toLowerCase() === s.color.toLowerCase() }"
+                    :style="{ background: s.color }"
+                    :title="`CFS 料道${s.index} · ${s.material} · ${s.name}`"
+                    @click="pickCfsSlot(s)">
+                <span class="pb-slotnum">{{ s.index }}</span>
+              </span>
+              <span class="pb-slotsep">|</span>
+            </template>
             <span v-for="c in PRESET_COLORS" :key="c.c" class="pb-dot"
                   :class="{ active: color.toLowerCase() === c.c }"
                   :style="{ background: c.c }" :title="c.n" @click="color = c.c"></span>
@@ -324,4 +359,8 @@ async function importOnly() {
   align-items: center; justify-content: center;
 }
 .pb-dot.active { box-shadow: 0 0 0 2px var(--pb-primary); }
+.pb-slotnum {
+  font-size: 10px; color: #fff; text-shadow: 0 0 2px #000; font-weight: 700;
+}
+.pb-slotsep { color: #dcdee0; margin: 0 2px; }
 </style>

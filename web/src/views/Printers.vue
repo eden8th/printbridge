@@ -62,7 +62,7 @@ function openAdd() {
   editing.value = null
   form.value = {
     name: '', adapter: 'creality_ws', host: '', port: null, secret: '',
-    settings: { model: models.value[0]?.key || '' },
+    settings: { model: models.value[0]?.key || '', ssh_password: '' },
   }
   showForm.value = true
 }
@@ -72,7 +72,10 @@ function openEdit(p) {
   form.value = {
     name: p.name, adapter: p.adapter, host: p.host, port: p.port,
     secret: p.secret || '',
-    settings: { model: p.settings?.model || models.value[0]?.key || '' },
+    settings: {
+      model: p.settings?.model || models.value[0]?.key || '',
+      ssh_password: p.settings?.ssh_password || '',
+    },
   }
   showForm.value = true
 }
@@ -229,6 +232,8 @@ onUnmounted(() => store.off(onTel))
       <van-field v-model="form.host" label="IP 地址" placeholder="192.168.1.50" />
       <van-field v-model="form.port" type="number" label="端口" placeholder="留空用默认端口" />
       <van-field v-model="form.secret" label="密钥" placeholder="Moonraker API Key / FTP 密码" />
+      <van-field v-model="form.settings.ssh_password" label="SSH 密码"
+                 placeholder="选填:读取 CFS 料道颜色(只读)" />
       <div class="pb-muted" style="padding:4px 16px 10px">
         创想 K 系列默认端口 9999;Klipper/Moonraker 默认 7125。连不上时先在电脑上跑探测工具。
       </div>
