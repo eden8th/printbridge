@@ -36,9 +36,22 @@ function openEdit(p) {
 }
 
 async function save() {
+  const f = form.value
+  if (!f.name.trim()) return showFailToast('请填写打印机名称')
+  if (!f.host.trim()) return showFailToast('请填写打印机 IP 地址')
+  // Vant number 输入框返回字符串:空→null,数字→int
+  const payload = {
+    ...f,
+    name: f.name.trim(),
+    host: f.host.trim(),
+    port: f.port === '' || f.port == null ? null : Number(f.port),
+  }
+  if (payload.port != null && Number.isNaN(payload.port)) {
+    return showFailToast('端口必须是数字')
+  }
   try {
-    if (editing.value) await api.put(`/api/printers/${editing.value}`, form.value)
-    else await api.post('/api/printers', form.value)
+    if (editing.value) await api.put(`/api/printers/${editing.value}`, payload)
+    else await api.post('/api/printers', payload)
     showForm.value = false
     showSuccessToast('已保存')
     load()
@@ -86,7 +99,7 @@ onUnmounted(() => store.off(onTel))
   <div class="pb-page">
     <van-nav-bar title="打印机">
       <template #right>
-        <van-icon name="plus" size="20" @click="openAdd" />
+        <span class="pb-navbar-action" role="button" @click="openAdd">添加</span>
       </template>
     </van-nav-bar>
 
@@ -131,7 +144,7 @@ onUnmounted(() => store.off(onTel))
     </div>
 
     <van-dialog v-model:show="showForm" :title="editing ? '编辑打印机' : '添加打印机'"
-                show-cancel @confirm="save" style="padding:8px">
+                show-cancel-button @confirm="save" style="padding:8px">
       <van-field v-model="form.name" label="名称" placeholder="客厅 K2 Plus" />
       <van-field label="适配器" readonly>
         <template #input>

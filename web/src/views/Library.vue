@@ -49,9 +49,9 @@ onUnmounted(() => store.off(onLib))
   <div class="pb-page">
     <van-nav-bar title="我的模型库">
       <template #right>
-        <label>
+        <label class="pb-navbar-action" role="button">
           <input type="file" accept=".3mf,.stl,.gcode" style="display:none" @change="onUpload" />
-          <van-icon name="plus" size="20" />
+          上传
         </label>
       </template>
     </van-nav-bar>

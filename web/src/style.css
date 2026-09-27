@@ -20,3 +20,4 @@ body {
 .pb-grow { flex: 1; min-width: 0; }
 .pb-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pb-thumb { width: 84px; height: 84px; border-radius: 8px; object-fit: cover; background: #eef0f3; flex: none; }
+.pb-navbar-action { font-size: 14px; color: var(--pb-primary); padding: 6px 2px; cursor: pointer; }

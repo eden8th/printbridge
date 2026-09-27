@@ -11,7 +11,14 @@ async function request(method, url, body) {
     let detail = `HTTP ${resp.status}`
     try {
       const data = await resp.json()
-      detail = data.detail || data.error || detail
+      if (Array.isArray(data.detail)) {
+        // FastAPI 校验错误数组 → 可读文案
+        detail = data.detail
+          .map((e) => `${(e.loc || []).slice(-1)[0] ?? ''}: ${e.msg}`.trim())
+          .join('; ')
+      } else {
+        detail = data.detail || data.error || detail
+      }
     } catch { /* 非 JSON 错误体 */ }
     throw new Error(detail)
   }

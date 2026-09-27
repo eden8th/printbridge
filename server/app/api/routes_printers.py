@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,22 @@ class PrinterBody(BaseModel):
     port: int | None = None
     secret: str = ""
     settings: dict = {}
+
+    @field_validator("port", mode="before")
+    @classmethod
+    def _empty_port_to_none(cls, v):
+        """前端 number 输入框留空会提交 "",归一为 None(用适配器默认端口)。"""
+        if v in ("", None):
+            return None
+        return v
+
+    @field_validator("name", "host")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("不能为空")
+        return v
 
 
 @router.get("")
