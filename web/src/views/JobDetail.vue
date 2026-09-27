@@ -62,11 +62,34 @@ function stepColor(i) {
 const sliceInfo = computed(() => {
   const p = job.value?.payload || {}
   if (!p.bundle) return ''
+  return String(p.machine_id || '').split(' @')[0]
+})
+
+// 结构化打印参数:机型/喷头/材料/颜色/工艺
+const COLOR_NAMES = {
+  '#1a1a1a': '黑', '#f2f2f2': '白', '#8c8c8c': '灰', '#d32f2f': '红',
+  '#f57c00': '橙', '#fbc02d': '黄', '#388e3c': '绿', '#1976d2': '蓝',
+  '#7b1fa2': '紫', '#795548': '棕',
+}
+const printParams = computed(() => {
+  const p = job.value?.payload || {}
+  if (!p.bundle) return null
   const clean = (s) => (s ? String(s).split(' @')[0] : s)
-  const parts = [clean(p.machine_id),
-    ...(p.filament_ids || []).map(clean), clean(p.process_id)].filter(Boolean)
-  const colors = p.filament_colors || []
-  return parts.join(' · ') + (colors[0] ? ` · 颜色 ${colors[0]}` : '')
+  const machinePretty = clean(p.machine_id)
+    .replace(/\s+\d+(?:\.\d+)?\s*nozzle\.json$/i, '')
+    .replace(/\.json$/i, '')
+  const m = String(p.machine_id || '').match(/(\d+(?:\.\d+)?)\s*nozzle/i)
+  const fil = (p.filament_ids || []).map(clean)
+  const color = (p.filament_colors || [])[0] || ''
+  return {
+    machine: machinePretty,
+    nozzle: m ? `${m[1]} mm` : '',
+    material: fil.join('、'),
+    color,
+    colorName: COLOR_NAMES[color.toLowerCase()] || '',
+    process: clean(p.process_id),
+    multi: (p.filament_ids || []).length > 1,
+  }
 })
 
 const fmtMin = (s) => (s ? `${Math.round(s / 60)} 分钟` : '')
@@ -142,6 +165,37 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
 
     <!-- 详情信息 -->
     <div class="pb-card" style="font-size:13px;line-height:2">
+      <h3 class="pb-title">打印参数</h3>
+      <template v-if="printParams">
+        <div class="pb-row">
+          <span class="pb-muted" style="flex:none;width:72px">机型</span>
+          <span class="pb-grow pb-ellipsis">{{ printParams.machine }}</span>
+        </div>
+        <div class="pb-row" v-if="printParams.nozzle">
+          <span class="pb-muted" style="flex:none;width:72px">喷头</span>
+          <span class="pb-grow">{{ printParams.nozzle }}</span>
+        </div>
+        <div class="pb-row" v-if="printParams.material">
+          <span class="pb-muted" style="flex:none;width:72px">材料</span>
+          <span class="pb-grow pb-ellipsis">{{ printParams.material }}</span>
+        </div>
+        <div class="pb-row" v-if="printParams.color">
+          <span class="pb-muted" style="flex:none;width:72px">颜色</span>
+          <span class="pb-dot" :style="{ background: printParams.color }"></span>
+          <span class="pb-grow">
+            {{ printParams.colorName || '自定义' }}
+            <span class="pb-muted">{{ printParams.color.toUpperCase() }}</span>
+          </span>
+        </div>
+        <div class="pb-row" v-if="printParams.process">
+          <span class="pb-muted" style="flex:none;width:72px">工艺</span>
+          <span class="pb-grow pb-ellipsis">{{ printParams.process }}</span>
+        </div>
+      </template>
+      <div class="pb-row" v-else-if="sliceInfo">
+        <span class="pb-muted" style="flex:none;width:72px">切片参数包</span>
+        <span class="pb-grow pb-ellipsis">{{ sliceInfo }}</span>
+      </div>
       <div class="pb-row" v-if="job.model_file_name">
         <span class="pb-muted" style="flex:none;width:72px">模型文件</span>
         <span class="pb-grow pb-ellipsis">{{ job.model_file_name }}</span>
@@ -154,23 +208,21 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
         <span class="pb-muted" style="flex:none;width:72px">目标打印机</span>
         <span class="pb-grow">{{ job.printer_name }}</span>
       </div>
-      <div class="pb-row" v-if="sliceInfo">
-        <span class="pb-muted" style="flex:none;width:72px">切片参数</span>
-        <span class="pb-grow pb-ellipsis">{{ sliceInfo }}</span>
-      </div>
       <div class="pb-row" v-if="job.result?.estimated_sec">
-        <span class="pb-muted" style="flex:none;width:72px">预估耗时</span>
+        <span class="pb-muted" style="flex:none;width:72px">预估</span>
         <span class="pb-grow">{{ fmtMin(job.result.estimated_sec) }}
           · {{ Math.round(job.result.filament_grams || 0) }} g 耗材</span>
       </div>
-      <div class="pb-row" v-if="job.result?.gcode_file_id">
+      <div class="pb-row" v-if="job.result?.gcode_path || job.result?.gcode_file_id">
         <span class="pb-muted" style="flex:none;width:72px">G-code 产物</span>
         <span class="pb-grow"></span>
-        <a :href="`/api/library/files/${job.result.gcode_file_id}/download`">
-          <van-button size="mini" plain type="primary">下载 G-code</van-button>
+        <a :href="job.result?.gcode_file_id
+            ? `/api/library/files/${job.result.gcode_file_id}/download`
+            : `/api/jobs/${job.id}/gcode`">
+          <van-button size="mini" plain type="primary">下载</van-button>
         </a>
       </div>
-      <div class="pb-muted">
+      <div class="pb-muted" style="margin-top:4px">
         创建于 {{ new Date(job.created_at).toLocaleString('zh-CN') }}
       </div>
     </div>
@@ -197,6 +249,10 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
 
 <style scoped>
 .pb-steps { margin-top: 8px; }
+.pb-dot {
+  width: 18px; height: 18px; border-radius: 50%; flex: none;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px #dcdee0;
+}
 .pb-log {
   background: #0d1117; color: #c9d1d9; font-size: 11px; line-height: 1.5;
   padding: 10px; border-radius: 8px; overflow: auto; max-height: 320px;

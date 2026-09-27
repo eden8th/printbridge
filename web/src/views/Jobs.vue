@@ -68,6 +68,8 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
     <div v-for="j in jobs" :key="j.id" class="pb-card clickable" @click="router.push(`/jobs/${j.id}`)">
       <div class="pb-row">
         <van-tag :color="stateColor[j.state] || '#969799'">{{ j.state }}</van-tag>
+        <span v-if="(j.payload?.filament_colors || [])[0]" class="pb-listdot"
+              :style="{ background: j.payload.filament_colors[0] }"></span>
         <div class="pb-grow pb-ellipsis" style="font-weight:600">
           #{{ j.id }} {{ j.kind === 'slice' ? '切片任务' : '一键打印' }}
         </div>
@@ -95,4 +97,8 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
 
 <style scoped>
 .clickable { cursor: pointer; }
+.pb-listdot {
+  width: 14px; height: 14px; border-radius: 50%; flex: none;
+  border: 1.5px solid #fff; box-shadow: 0 0 0 1px #dcdee0;
+}
 </style>

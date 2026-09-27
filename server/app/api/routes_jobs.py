@@ -53,6 +53,7 @@ class SliceOnlyBody(BaseModel):
     bundle: str
     machine_id: str
     filament_ids: list[str]
+    filament_colors: list[str] = []
     process_id: str
     plate: int | None = None
 
@@ -64,9 +65,11 @@ async def slice_only(body: SliceOnlyBody, db: AsyncSession = Depends(get_db),
     f = await db.get(ModelFile, body.file_id)
     if f is None or f.user_id != user.id:
         raise HTTPException(404, "文件不存在")
+    payload = {"slice_only": True, "model_file_id": body.file_id,
+               **body.model_dump(exclude_none=True, exclude={"file_id"})}
     job = await jsvc.create_job(
         db, user.id, kind="slice", model_file_id=body.file_id,
-        payload={"slice_only": True, **body.model_dump(exclude_none=True)})
+        payload=payload)
     queue.enqueue(job.id)
     return {"job_id": job.id}
 
@@ -140,6 +143,25 @@ async def job_log(job_id: int, db: AsyncSession = Depends(get_db),
     p = Path(j.log_path)
     return {"log": p.read_text(encoding="utf-8", errors="replace")[-8000:]
             if p.is_file() else ""}
+
+
+@router.get("/jobs/{job_id}/gcode")
+async def job_gcode(job_id: int, db: AsyncSession = Depends(get_db),
+                    user: User = Depends(current_user)):
+    """下载该任务切片产出的 G-code(打印类任务的产物不在模型库里)。"""
+    from pathlib import Path
+    from fastapi.responses import FileResponse as _FR
+    from app.services import storage
+    j = await db.get(Job, job_id)
+    if j is None or j.user_id != user.id:
+        raise HTTPException(404, "任务不存在")
+    rel = str((j.result or {}).get("gcode_path") or "")
+    if not rel:
+        raise HTTPException(404, "该任务没有 G-code 产物")
+    p = storage.abs_path(rel)
+    if not p.is_file():
+        raise HTTPException(404, "产物文件已被清理")
+    return _FR(str(p), filename=p.name)
 
 
 @router.post("/jobs/{job_id}/cancel")
