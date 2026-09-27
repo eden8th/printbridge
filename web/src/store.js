@@ -23,6 +23,9 @@ export const store = reactive({
         if (msg.type === 'job_update') {
           this.jobs[msg.data.id] = { ...(this.jobs[msg.data.id] || {}), ...msg.data }
           this._emit('job', msg.data)
+        } else if (msg.type === 'job_deleted') {
+          delete this.jobs[msg.data.id]
+          this._emit('job', { id: msg.data.id, deleted: true })
         } else if (msg.type === 'printer_telemetry') {
           this.printers[msg.data.printer_id] = msg.data
           this._emit('telemetry', msg.data)

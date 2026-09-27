@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user, get_db
-from app.models import Job, ModelFile, User
+from app.core.events import bus
+from app.models import Job, ModelFile, Printer, User
 from app.orchestration import jobs_service as jsvc
 from app.orchestration.queue import queue
 from app.slicing import detect_slicer, list_bundles
@@ -81,6 +82,49 @@ async def list_jobs(limit: int = 50, db: AsyncSession = Depends(get_db),
              "model_file_id": j.model_file_id, "printer_id": j.printer_id,
              "payload": j.payload, "result": j.result,
              "created_at": j.created_at.isoformat()} for j in res.scalars()]
+
+
+@router.get("/jobs/{job_id}")
+async def job_detail(job_id: int, db: AsyncSession = Depends(get_db),
+                     user: User = Depends(current_user)):
+    """任务详情(含模型/打印机名称富化)。"""
+    j = await db.get(Job, job_id)
+    if j is None or j.user_id != user.id:
+        raise HTTPException(404, "任务不存在")
+    model_file_name = printer_name = None
+    if j.model_file_id:
+        f = await db.get(ModelFile, j.model_file_id)
+        model_file_name = f.name if f else None
+    if j.printer_id:
+        p = await db.get(Printer, j.printer_id)
+        printer_name = p.name if p else None
+    return {
+        "id": j.id, "kind": j.kind, "state": j.state, "detail": j.detail,
+        "progress": j.progress, "error": j.error, "payload": j.payload,
+        "result": j.result, "model_file_id": j.model_file_id,
+        "model_file_name": model_file_name, "printer_id": j.printer_id,
+        "printer_name": printer_name, "has_log": bool(j.log_path),
+        "created_at": j.created_at.isoformat(),
+        "updated_at": j.updated_at.isoformat(),
+    }
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: int, db: AsyncSession = Depends(get_db),
+                     user: User = Depends(current_user)):
+    """删除任务(仅限已结束的任务;进行中的请先取消)。"""
+    from pathlib import Path
+    j = await db.get(Job, job_id)
+    if j is None or j.user_id != user.id:
+        raise HTTPException(404, "任务不存在")
+    if j.state not in ("done", "failed", "cancelled"):
+        raise HTTPException(400, "任务仍在进行中,请先取消再删除")
+    if j.log_path:
+        Path(j.log_path).unlink(missing_ok=True)
+    await db.delete(j)
+    await db.commit()
+    await bus.publish("job_deleted", {"id": job_id})
+    return {"ok": True}
 
 
 @router.get("/jobs/{job_id}/log")

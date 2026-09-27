@@ -1,12 +1,19 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { api } from '../api'
 import { store } from '../store'
 
+const router = useRouter()
 const jobs = ref([])
 
 async function load() {
-  jobs.value = await api.get('/api/jobs?limit=100')
+  try {
+    jobs.value = await api.get('/api/jobs?limit=100')
+  } catch (e) {
+    showFailToast(e.message)
+  }
 }
 
 const stateColor = {
@@ -20,8 +27,25 @@ function progressText(j) {
   return ''
 }
 
+async function cancelJob(j) {
+  try {
+    await api.post(`/api/jobs/${j.id}/cancel`)
+    load()
+  } catch (e) {
+    showFailToast(e.message)
+  }
+}
+
+function delJob(j) {
+  showConfirmDialog({ title: '删除任务', message: `确定删除任务 #${j.id}?记录与日志将一并删除。` })
+    .then(async () => {
+      await api.del(`/api/jobs/${j.id}`)
+      showSuccessToast('已删除')
+      load()
+    }).catch(() => {})
+}
+
 function syncFromWs() {
-  // WS 推来的任务覆盖本地列表,并周期性全量刷新兜底
   load()
 }
 
@@ -41,16 +65,18 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
 
     <van-empty v-if="!jobs.length" description="还没有任务。去「发现」页挑个模型一键打印吧" />
 
-    <div v-for="j in jobs" :key="j.id" class="pb-card">
+    <div v-for="j in jobs" :key="j.id" class="pb-card clickable" @click="router.push(`/jobs/${j.id}`)">
       <div class="pb-row">
         <van-tag :color="stateColor[j.state] || '#969799'">{{ j.state }}</van-tag>
         <div class="pb-grow pb-ellipsis" style="font-weight:600">
           #{{ j.id }} {{ j.kind === 'slice' ? '切片任务' : '一键打印' }}
         </div>
         <van-button v-if="!['done', 'failed', 'cancelled'].includes(j.state)"
-                    size="mini" plain type="danger"
-                    @click="api.post(`/api/jobs/${j.id}/cancel`).then(load)">
+                    size="mini" plain type="warning" @click.stop="cancelJob(j)">
           取消
+        </van-button>
+        <van-button v-else size="mini" plain type="danger" @click.stop="delJob(j)">
+          删除
         </van-button>
       </div>
       <div class="pb-muted" style="margin-top:6px">
@@ -59,11 +85,14 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
       </div>
       <van-progress v-if="j.progress > 0 && j.state !== 'done'"
                     :percentage="Math.round(j.progress * 100)" style="margin-top:8px" />
-      <div class="pb-muted" style="margin-top:6px">
-        {{ new Date(j.created_at).toLocaleString('zh-CN') }}
-        <a v-if="j.result?.gcode_file_id" :href="`/api/library/files/${j.result.gcode_file_id}/download`"
-           style="margin-left:8px">下载 G-code</a>
+      <div class="pb-muted pb-row" style="margin-top:6px">
+        <span class="pb-grow">{{ new Date(j.created_at).toLocaleString('zh-CN') }}</span>
+        <span>详情 <van-icon name="arrow" /></span>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.clickable { cursor: pointer; }
+</style>
