@@ -1,0 +1,163 @@
+"""任务(一键打印/切片)与设置/参数包。"""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import current_user, get_db
+from app.models import Job, ModelFile, User
+from app.orchestration import jobs_service as jsvc
+from app.orchestration.queue import queue
+from app.slicing import detect_slicer, list_bundles
+from app.services.settings_service import get_setting, put_setting
+
+router = APIRouter(prefix="/api", tags=["jobs"])
+
+
+class OneClickBody(BaseModel):
+    # 来源二选一
+    source: str | None = None
+    design_id: str | None = None
+    instance_id: str | None = None
+    model_file_id: int | None = None
+    # 打印目标与切片参数
+    printer_id: int
+    bundle: str
+    machine_id: str
+    filament_ids: list[str]
+    process_id: str
+    plate: int | None = None
+    auto_start: bool = True
+
+
+@router.post("/jobs/oneclick")
+async def oneclick(body: OneClickBody, db: AsyncSession = Depends(get_db),
+                   user: User = Depends(current_user)):
+    """核心接口:搜索页点「一键打印」即调这里。"""
+    if not body.model_file_id and not (body.source and body.design_id):
+        raise HTTPException(400, "需要 model_file_id 或 source+design_id")
+    job = await jsvc.create_job(
+        db, user.id, kind="pipeline", printer_id=body.printer_id,
+        model_file_id=body.model_file_id,
+        payload=body.model_dump(exclude_none=True))
+    queue.enqueue(job.id)
+    return {"job_id": job.id}
+
+
+class SliceOnlyBody(BaseModel):
+    file_id: int
+    bundle: str
+    machine_id: str
+    filament_ids: list[str]
+    process_id: str
+    plate: int | None = None
+
+
+@router.post("/jobs/slice")
+async def slice_only(body: SliceOnlyBody, db: AsyncSession = Depends(get_db),
+                     user: User = Depends(current_user)):
+    """只切片不打印(产物进模型库,可再手动推打印)。"""
+    f = await db.get(ModelFile, body.file_id)
+    if f is None or f.user_id != user.id:
+        raise HTTPException(404, "文件不存在")
+    job = await jsvc.create_job(
+        db, user.id, kind="slice", model_file_id=body.file_id,
+        payload={"slice_only": True, **body.model_dump(exclude_none=True)})
+    queue.enqueue(job.id)
+    return {"job_id": job.id}
+
+
+@router.get("/jobs")
+async def list_jobs(limit: int = 50, db: AsyncSession = Depends(get_db),
+                    user: User = Depends(current_user)):
+    res = await db.execute(
+        select(Job).where(Job.user_id == user.id)
+        .order_by(Job.id.desc()).limit(min(limit, 200)))
+    return [{"id": j.id, "kind": j.kind, "state": j.state, "detail": j.detail,
+             "progress": j.progress, "error": j.error,
+             "model_file_id": j.model_file_id, "printer_id": j.printer_id,
+             "payload": j.payload, "result": j.result,
+             "created_at": j.created_at.isoformat()} for j in res.scalars()]
+
+
+@router.get("/jobs/{job_id}/log")
+async def job_log(job_id: int, db: AsyncSession = Depends(get_db),
+                  user: User = Depends(current_user)):
+    from app.services import storage
+    j = await db.get(Job, job_id)
+    if j is None or j.user_id != user.id:
+        raise HTTPException(404, "任务不存在")
+    if not j.log_path:
+        return {"log": ""}
+    from pathlib import Path
+    p = Path(j.log_path)
+    return {"log": p.read_text(encoding="utf-8", errors="replace")[-8000:]
+            if p.is_file() else ""}
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: int, db: AsyncSession = Depends(get_db),
+                     user: User = Depends(current_user)):
+    j = await db.get(Job, job_id)
+    if j is None or j.user_id != user.id:
+        raise HTTPException(404, "任务不存在")
+    if j.state in ("done", "failed", "cancelled"):
+        return {"ok": True, "state": j.state}
+    await jsvc.set_state(db, j, "cancelled", error="用户取消")
+    return {"ok": True}
+
+
+# ---- 切片参数包 --------------------------------------------------------
+@router.get("/profiles")
+async def profiles():
+    out = []
+    for b in list_bundles():
+        out.append({
+            "key": b.key,
+            "machines": [m.__dict__ for m in b.machines],
+            "filaments": [f.__dict__ for f in b.filaments],
+            "processes": [p.__dict__ for p in b.processes],
+        })
+    return out
+
+
+# ---- 设置 --------------------------------------------------------------
+@router.get("/settings")
+async def read_settings(db: AsyncSession = Depends(get_db),
+                        user: User = Depends(current_user)):
+    cfg = await get_setting(db, "app")
+    mw = await get_setting(db, "makerworld")
+    # token 只回传是否有值,不回传内容
+    return {"app": cfg,
+            "makerworld": {**mw, "token": "已配置" if mw.get("token") else ""}}
+
+
+class SettingsBody(BaseModel):
+    app: dict = {}
+    makerworld: dict = {}
+
+
+@router.put("/settings")
+async def write_settings(body: SettingsBody,
+                         db: AsyncSession = Depends(get_db),
+                         user: User = Depends(current_user)):
+    if body.app:
+        await put_setting(db, "app", body.app)
+    if body.makerworld:
+        cur = await get_setting(db, "makerworld")
+        new = {**cur, **body.makerworld}
+        if body.makerworld.get("token") == "已配置":  # 前端原样回传 = 不修改
+            new["token"] = cur.get("token", "")
+        await put_setting(db, "makerworld", new)
+    return {"ok": True}
+
+
+@router.get("/settings/slicer-probe")
+async def slicer_probe(db: AsyncSession = Depends(get_db),
+                       user: User = Depends(current_user)):
+    cfg = await get_setting(db, "app")
+    path = detect_slicer(str(cfg.get("slicer_exe") or ""))
+    return {"found": bool(path), "path": path}

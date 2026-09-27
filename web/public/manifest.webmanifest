@@ -1,0 +1,12 @@
+{
+  "name": "PrintBridge · 跨品牌一键打印",
+  "short_name": "PrintBridge",
+  "description": "从模型市场一键下载、切片并推送到任意品牌 3D 打印机",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#1989fa",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

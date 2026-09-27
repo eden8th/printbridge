@@ -1,0 +1,22 @@
+:root {
+  --pb-primary: #1989fa;
+}
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; background: #f7f8fa; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+#app { max-width: 720px; margin: 0 auto; position: relative; }
+.pb-page { padding: 12px 12px 90px; }
+.pb-card {
+  background: #fff; border-radius: 12px; padding: 12px;
+  margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.05);
+}
+.pb-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+.pb-muted { color: #969799; font-size: 12px; }
+.pb-row { display: flex; align-items: center; gap: 8px; }
+.pb-grow { flex: 1; min-width: 0; }
+.pb-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-thumb { width: 84px; height: 84px; border-radius: 8px; object-fit: cover; background: #eef0f3; flex: none; }
