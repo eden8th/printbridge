@@ -1,12 +1,11 @@
-"""切片参数包注册表:按「机型 - 喷嘴 - 耗材/工艺」解析官方参数 JSON。
+"""切片参数包注册表:按「机型 - 喷嘴 - 耗材/工艺」解析 Orca 系官方参数 JSON。
 
-目录约定(profiles/<机型key>/):
-  machine/   Creality K2 Plus.json(基础) + Creality K2 Plus 0.4 nozzle.json(可打印变体)
-  filament/  CR-PLA @Creality K2 Plus 0.4 nozzle.json ...
-  process/   0.20mm Standard @Creality K2 Plus 0.4 nozzle.json ...
-
-文件名规律:`<名> @<机型> <喷嘴> nozzle.json`,据此分组;耗材材质类型从
-JSON 内的 filament_type 读取(带缓存)。
+目录约定:profiles/<目录名>/{machine,filament,process}/,目录内可混放多个
+机型(如 Orca 官方 Creality 目录 143 个机器文件),registry 按文件名规律
+`<机型> <喷嘴> nozzle.json` 自动分组为多个机型 bundle:
+  machine:  "Creality K2 Pro 0.4 nozzle.json" → base="Creality K2 Pro" nozzle=0.4
+  filament: "CR-PLA @Creality K2 Pro 0.4 nozzle.json"
+bundle key = 机型名去符号小写(如 crealityk2pro),与打印机 settings.model 对应。
 """
 from __future__ import annotations
 
@@ -18,6 +17,8 @@ from pathlib import Path
 from app.core.config import settings
 
 NOZZLE_RE = re.compile(r"^(?P<base>.+?)\s+(?P<nozzle>\d+(?:\.\d+)?)\s+nozzle\.json$")
+# Orca 官方耗材命名:"CR-PLA @K2 Pro-all.json"(机型简称,-all=全喷嘴通用)
+ALL_RE = re.compile(r"^(?P<name>.+?)\s+@(?P<machine>.+?)-all\.json$")
 
 
 @dataclass
@@ -41,8 +42,9 @@ class ProcessItem:
 
 @dataclass
 class MachineBundle:
-    key: str
-    name: str              # 机型基础名(Creality K2 Plus)
+    key: str               # 机型 slug,如 crealityk2pro
+    name: str              # 机型基础名(Creality K2 Pro)
+    dir: Path              # 所在参数目录
     nozzles: list[NozzleOption] = field(default_factory=list)
     filaments: dict[str, list[FilamentItem]] = field(default_factory=dict)
     processes: dict[str, list[ProcessItem]] = field(default_factory=dict)
@@ -50,10 +52,25 @@ class MachineBundle:
 
 _meta_cache: dict[str, str] = {}
 
+# Orca 部分官方耗材 JSON 缺 filament_type,按名称推断兜底
+_TYPE_WORDS = ["PETG", "PLA-CF", "PLA", "ABS", "TPU", "NYLON", "ASA",
+               "PA-CF", "PAHT-CF", "PET-CF", "PVA", "HIPS", "PA"]
 
-def _filament_type(path: Path) -> str:
-    """读取耗材 JSON 的 filament_type(带缓存,避免每次请求都读 160 个文件)。"""
-    key = f"{path}:{path.stat().st_mtime_ns}"
+
+def _infer_type_from_name(name: str) -> str:
+    up = name.upper()
+    for w in _TYPE_WORDS:
+        if w in up:
+            return w
+    return ""
+
+
+def _filament_type(path: Path, name: str = "") -> str:
+    """读取耗材 JSON 的 filament_type(带缓存);缺失时按名称推断。"""
+    try:
+        key = f"{path}:{path.stat().st_mtime_ns}"
+    except OSError:
+        return ""
     if key not in _meta_cache:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -61,17 +78,37 @@ def _filament_type(path: Path) -> str:
             _meta_cache[key] = (ft[0] if isinstance(ft, list) and ft else str(ft or ""))
         except Exception:
             _meta_cache[key] = ""
-        if len(_meta_cache) > 2000:   # 防缓存无限膨胀
+        if not _meta_cache[key]:
+            _meta_cache[key] = _infer_type_from_name(name)
+        if len(_meta_cache) > 4000:
             _meta_cache.clear()
     return _meta_cache[key]
 
 
-def _split_name(filename: str) -> tuple[str, str] | None:
-    """'CR-PLA @Creality K2 Plus 0.4 nozzle.json' -> ('CR-PLA', '0.4')"""
+def _split_name(filename: str) -> tuple[str, str, str | None] | None:
+    """解析耗材/工艺文件名 → (展示名, 机型, 喷嘴)。
+
+    兼容两种命名:
+      'CR-PLA @Creality K2 Pro 0.4 nozzle.json' → ('CR-PLA', 'Creality K2 Pro', '0.4')
+      'CR-PLA @K2 Pro-all.json'                 → ('CR-PLA', 'K2 Pro', None=全喷嘴)
+    """
     m = NOZZLE_RE.match(filename)
-    if not m:
-        return None
-    return m.group("base").split(" @", 1)[0], m.group("nozzle")
+    if m:
+        name, sep, base = m.group("base").rpartition(" @")
+        return (name or base), (base or m.group("base")), m.group("nozzle")
+    m = ALL_RE.match(filename)
+    if m:
+        return m.group("name"), m.group("machine"), None
+    return None
+
+
+def _slug(base: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", base.lower())
+
+
+def _norm_short(base: str) -> str:
+    """机型名规范化(去掉 Creality 前缀),用于匹配 Orca 耗材的机型简称。"""
+    return _slug(re.sub(r"^creality\s+", "", base.strip(), flags=re.I))
 
 
 def list_bundles() -> list[MachineBundle]:
@@ -80,39 +117,54 @@ def list_bundles() -> list[MachineBundle]:
     if not root.is_dir():
         return bundles
     for d in sorted(root.iterdir()):
-        if not d.is_dir():
-            continue
         machine_dir = d / "machine"
-        if not machine_dir.is_dir():
+        if not d.is_dir() or not machine_dir.is_dir():
             continue
-        nozzles: list[NozzleOption] = []
-        base_name = ""
+        groups: dict[str, list[NozzleOption]] = {}
         for f in sorted(machine_dir.glob("*.json")):
             m = NOZZLE_RE.match(f.name)
             if m:
-                nozzles.append(NozzleOption(nozzle=m.group("nozzle"), machine_id=f.name))
-                base_name = base_name or m.group("base")
-        if not nozzles:
-            continue
-        b = MachineBundle(key=d.name, name=base_name, nozzles=nozzles)
-        for sub, items_cls in (("filament", FilamentItem), ("process", ProcessItem)):
-            parsed: dict[str, list] = {}
-            for f in sorted((d / sub).glob("*.json")):
+                groups.setdefault(m.group("base"), []).append(
+                    NozzleOption(nozzle=m.group("nozzle"), machine_id=f.name))
+        for base, nozzles in sorted(groups.items()):
+            key = _slug(base)
+            if not key:
+                continue
+            b = MachineBundle(key=key, name=base, dir=d, nozzles=nozzles)
+            # 工艺:带喷嘴的完整命名,按 base 精确归属
+            for f in sorted((d / "process").glob("*.json")):
                 sp = _split_name(f.name)
-                if not sp:
+                if not sp or sp[1] != base or sp[2] is None:
                     continue
-                name, nozzle = sp
-                if items_cls is FilamentItem:
-                    parsed.setdefault(nozzle, []).append(
-                        FilamentItem(id=f.name, name=name, ftype=_filament_type(f)))
-                else:
-                    parsed.setdefault(nozzle, []).append(
-                        ProcessItem(id=f.name, name=name))
-            if items_cls is FilamentItem:
-                b.filaments = parsed
-            else:
-                b.processes = parsed
-        bundles.append(b)
+                b.processes.setdefault(sp[2], []).append(
+                    ProcessItem(id=f.name, name=sp[0]))
+            bundles.append(b)
+
+    # 耗材:Orca 命名用机型简称且全喷嘴通用,按规范化名归属到所有喷嘴
+    by_short: dict[tuple[Path, str], MachineBundle] = {}
+    for b in bundles:
+        by_short.setdefault((b.dir, _norm_short(b.name)), b)
+    for d in sorted(root.iterdir()):
+        fil_dir = d / "filament"
+        if not d.is_dir() or not fil_dir.is_dir():
+            continue
+        for f in sorted(fil_dir.glob("*.json")):
+            sp = _split_name(f.name)
+            if not sp:
+                continue
+            name, machine, nozzle = sp
+            b = by_short.get((d, _norm_short(machine)))
+            if b is None:
+                continue
+            item = FilamentItem(id=f.name, name=name,
+                                ftype=_filament_type(f, name))
+            targets = [n.nozzle for n in b.nozzles] if nozzle is None else [nozzle]
+            for nz in targets:
+                b.filaments.setdefault(nz, []).append(item)
+
+    for b in bundles:
+        for items in list(b.filaments.values()) + list(b.processes.values()):
+            items.sort(key=lambda x: (x.name, x.id))
     return bundles
 
 
@@ -126,10 +178,10 @@ def get_bundle(key: str) -> MachineBundle:
 def resolve_paths(bundle_key: str, machine_id: str, filament_ids: list[str],
                   process_id: str) -> tuple[list[str], list[str], str]:
     """把用户选择的 id 解析成绝对路径列表(供 CLI --load-* 参数)。"""
-    root = settings.profiles_dir / bundle_key
-    machine = [str(root / "machine" / machine_id)]
-    filaments = [str(root / "filament" / f) for f in filament_ids]
-    process = str(root / "process" / process_id)
+    b = get_bundle(bundle_key)
+    machine = [str(b.dir / "machine" / machine_id)]
+    filaments = [str(b.dir / "filament" / f) for f in filament_ids]
+    process = str(b.dir / "process" / process_id)
     for p in [*machine, *filaments, process]:
         if not Path(p).is_file():
             raise FileNotFoundError(f"参数文件不存在:{p}")
@@ -140,8 +192,7 @@ def prepare_filament_files(filament_paths: list[str], colors: list[str],
                            workdir: Path) -> list[str]:
     """按用户选色生成耗材配置副本(覆盖 filament_colour),返回新路径列表。
 
-    官方耗材 JSON 不带颜色;CFS 打印时颜色参与料道匹配,因此用户选择的
-    颜色必须写进切片配置。未指定颜色的文件原样使用。
+    颜色参与 CFS 料道匹配;未指定颜色的文件原样使用。
     """
     out: list[str] = []
     workdir.mkdir(parents=True, exist_ok=True)
@@ -162,17 +213,3 @@ def prepare_filament_files(filament_paths: list[str], colors: list[str],
         target.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         out.append(str(target))
     return out
-
-
-def read_profile_summary(path: str) -> dict:
-    """读取参数 JSON 的关键字段,用于 UI 展示。"""
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    hits = {}
-    for key in ("printer_model", "printable_area", "nozzle_diameter",
-                "filament_type", "filament_diameter", "compatible_printers"):
-        if key in data:
-            hits[key] = data[key]
-    return hits

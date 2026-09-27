@@ -1,32 +1,30 @@
-"""切片引擎:封装 OrcaSlicer / Creality Print 的无头 CLI。
+"""切片引擎:封装 OrcaSlicer 的无头 CLI(开源,完整支持无头切片)。
 
-两者都是 Orca(Slic3r 系)分支,核心调用形态一致:
-  <exe> --slice <in.3mf> [--plate N] \
-        --load-settings <machine.json> \
-        --load-filaments <filament.json,...> \
-        --load-process <process.json> \
-        --export-gcode -o <out.gcode>
+实测确认的调用形态(Orca v2.4.2):--slice 是板号整数,产物是内含
+G-code 的 3MF 容器(--export-3mf),由本模块解包出裸 .gcode:
+  orca-slicer --load-settings <machine.json> \
+      --load-settings <process.json> \
+      --load-filaments <filament.json> \
+      --slice 0 --export-3mf <out.gcode.3mf> <input.3mf>
 
-不同版本 CLI 参数可能微调,因此在设置页可覆盖命令模板;`--version`
-探测与 --help 输出保存,便于诊断。引擎路径按 优先级 自动探测:
-设置值 > 环境常见安装位置 > PATH。
+注意:Creality Print 7.x 经二进制验证已移除无头 CLI(报
+"Invalid value for option --slice" 且空输出退出),不再作为引擎;
+--slice 不配 --export-3mf 时 Orca 会误入 GUI 模式挂起,两者必须成对。
 """
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import re
 import shutil
 import subprocess  # noqa: S404 - 固定白名单参数,不接受用户拼接
 import sys
+import time
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 _WIN_COMMON = [
-    r"D:\Creality\Creality Print 7.1\CrealityPrint.exe",
-    r"D:\Creality\Creality Print\CrealityPrint.exe",
-    r"C:\Program Files\Creality Print\CrealityPrint.exe",
+    r"E:\Project\printbridge\tools\orca\orca-slicer.exe",
     r"C:\Program Files\OrcaSlicer\orca-slicer.exe",
     r"C:\Program Files\OrcaSlicer\orca-slicer-console.exe",
 ]
@@ -35,11 +33,11 @@ _WIN_COMMON = [
 @dataclass
 class SliceRequest:
     input_path: str
-    output_gcode: str
+    output_dir: str             # Orca 把产物写入该目录(--outputdir)
     machine_files: list[str]
     filament_files: list[str]
     process_file: str
-    plate: int | None = None   # 3MF 多板时从 1 开始;None=跟随文件默认板
+    plate: int = 0              # 0=全部板;单板 3MF 常见
     log_path: str = ""
 
 
@@ -55,75 +53,113 @@ class SliceResult:
 
 
 def detect_slicer(configured: str = "") -> str:
-    """定位切片器可执行文件。"""
+    """定位 OrcaSlicer 可执行文件。"""
     if configured and Path(configured).is_file():
         return configured
     for cand in _WIN_COMMON:
         if Path(cand).is_file():
             return cand
-    found = shutil.which("orca-slicer") or shutil.which("CrealityPrint")
+    import shutil
+    found = shutil.which("orca-slicer") or shutil.which("orca-slicer-console")
     return found or ""
+
+
+def _run_sync(req: SliceRequest, exe: str) -> tuple[int, list[str]]:
+    """同步运行切片子进程(Windows 上 asyncio 管道对 GUI 子系统程序不可靠)。"""
+    out_dir = Path(req.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    argv = [exe]
+    for m in req.machine_files:
+        argv += ["--load-settings", m]
+    argv += ["--load-settings", req.process_file]
+    for f in req.filament_files:
+        argv += ["--load-filaments", f]
+    argv += ["--slice", str(req.plate or 0),
+             "--export-3mf", str(out_dir / "result.gcode.3mf"),
+             req.input_path]
+
+    tail: list[str] = []
+    logf = open(req.log_path, "wb") if req.log_path else None  # noqa: SIM115
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    try:
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            creationflags=flags)
+    except FileNotFoundError:
+        return -1, [f"切片器不可执行:{exe}"]
+    try:
+        assert proc.stdout is not None
+        for raw in proc.stdout:
+            line = raw.decode("utf-8", "replace").rstrip()
+            tail.append(line)
+            if len(tail) > 400:
+                tail = tail[-400:]
+            if logf:
+                logf.write(raw)
+        code = proc.wait()
+    finally:
+        if logf:
+            logf.close()
+        if proc.poll() is None:
+            proc.kill()
+    return code, tail
+
+
+def _extract_gcode(gcode_3mf: Path, out_dir: Path) -> str:
+    """从 .gcode.3mf 容器里解出最大的 plate_N.gcode。"""
+    with zipfile.ZipFile(gcode_3mf) as z:
+        members = [i for i in z.infolist()
+                   if re.fullmatch(r"Metadata/plate_\d+\.gcode", i.filename)
+                   and i.file_size > 0]
+        if not members:
+            return ""
+        best = max(members, key=lambda i: i.file_size)
+        target = out_dir / Path(best.filename).name
+        with z.open(best) as src, open(target, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        return str(target)
 
 
 async def slice_model(req: SliceRequest, exe_path: str = "") -> SliceResult:
     exe = detect_slicer(exe_path)
     if not exe:
         return SliceResult(ok=False, error=(
-            "未找到切片器。请在设置页指定 OrcaSlicer / Creality Print 的安装路径"))
+            "未找到 OrcaSlicer。请把便携版解压到项目 tools/orca/,"
+            "或在设置页指定安装路径"))
 
-    argv = [
-        exe, "--slice", req.input_path,
-        "--load-settings", ",".join(req.machine_files),
-        "--load-filaments", ",".join(req.filament_files),
-        "--load-process", req.process_file,
-        "--export-gcode", "-o", req.output_gcode,
-    ]
-    if req.plate:
-        argv += ["--plate", str(req.plate)]
-    if req.log_path:
-        Path(req.log_path).parent.mkdir(parents=True, exist_ok=True)
-
-    import time
+    out_dir = Path(req.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdout=asyncio.subprocess.PIPE if req.log_path else subprocess.DEVNULL,
-            stderr=asyncio.subprocess.STDOUT if req.log_path else subprocess.DEVNULL,
-            creationflags=flags,
-        )
-        tail: list[str] = []
-        if req.log_path and proc.stdout is not None:
-            logf = open(req.log_path, "wb")  # noqa: SIM115 - 随进程生命周期关闭
-            try:
-                async for line in proc.stdout:
-                    tail.append(line.decode("utf-8", "replace").rstrip())
-                    if len(tail) > 200:
-                        tail = tail[-200:]
-                    logf.write(line)
-            finally:
-                logf.close()
-        else:
-            await proc.wait()
-        code = await proc.wait()
-    except FileNotFoundError:
-        return SliceResult(ok=False, error=f"切片器不可执行:{exe}")
+        code, tail = await asyncio.to_thread(_run_sync, req, exe)
+    except Exception as exc:  # noqa: BLE001
+        return SliceResult(ok=False, error=f"切片进程异常:{exc!r}")
     duration = time.monotonic() - t0
 
-    if code != 0 or not Path(req.output_gcode).is_file():
-        return SliceResult(ok=False, duration_sec=duration,
-                           error=f"切片失败(退出码 {code})",
-                           log_tail=tail if req.log_path else [])
-    est, grams = parse_gcode_stats(req.output_gcode)
-    return SliceResult(ok=True, gcode_path=req.output_gcode, duration_sec=round(duration, 1),
-                       estimated_sec=est, filament_grams=grams,
-                       log_tail=tail if req.log_path else [])
+    container = out_dir / "result.gcode.3mf"
+    gcode = ""
+    if code == 0 and container.is_file():
+        try:
+            gcode = _extract_gcode(container, out_dir)
+        except (zipfile.BadZipFile, OSError) as exc:
+            return SliceResult(ok=False, duration_sec=round(duration, 1),
+                               error=f"切片产物解包失败:{exc!r}", log_tail=tail)
+    if code != 0 or not gcode:
+        key_lines = [ln for ln in tail if ln.strip() and (
+            "error" in ln.lower() or "fail" in ln.lower() or "invalid" in ln.lower()
+            or "can not" in ln.lower() or "No such" in ln)]
+        detail = key_lines[-3:] if key_lines else tail[-3:]
+        return SliceResult(ok=False, duration_sec=round(duration, 1),
+                           error=f"切片失败(退出码 {code}):{' | '.join(detail) or '无输出'}",
+                           log_tail=tail)
+    est, grams = parse_gcode_stats(gcode)
+    return SliceResult(ok=True, gcode_path=gcode, duration_sec=round(duration, 1),
+                       estimated_sec=est, filament_grams=grams, log_tail=tail)
 
 
-_TIME_RE = re.compile(r";\s*(?:estimated\s+)?model printing time:\s*"
+_TIME_RE = re.compile(r";\s*estimated printing time[^=]*=\s*"
                       r"(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?", re.I)
-_G_RE = re.compile(r";\s*total filament used.*?([\d.]+)\s*g", re.I)
+_G_RE = re.compile(r";\s*filament used \[g\]\s*=\s*([\d.,\s]+)", re.I)
 
 
 def parse_gcode_stats(gcode_path: str) -> tuple[float, float]:
@@ -141,10 +177,6 @@ def parse_gcode_stats(gcode_path: str) -> tuple[float, float]:
     grams = 0.0
     m = _G_RE.search(head)
     if m:
-        grams = float(m.group(1))
+        # 多耗材逗号列表:取各通道之和(未用通道为 0)
+        grams = sum(float(x) for x in m.group(1).split(",") if x.strip())
     return seconds, grams
-
-
-def detect_from_settings(cfg: dict) -> str:
-    """settings 服务里的 slicer 配置 -> 引擎路径。"""
-    return detect_slicer(str(cfg.get("exe_path") or ""))

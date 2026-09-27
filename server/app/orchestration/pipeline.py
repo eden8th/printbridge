@@ -79,6 +79,9 @@ async def _download_stage(db: AsyncSession, job, payload: dict) -> ModelFile:
 
 
 async def _slice_stage(db: AsyncSession, job, payload: dict, file_row: ModelFile):
+    """切片并把产物移动到正式 G-code 目录,返回 (result, gcode相对路径)。"""
+    import shutil as _shutil
+
     await jsvc.set_state(db, job, "slicing", "调用切片引擎", 0.4)
     from app.slicing import registry
     machine_ids, filament_paths, process_path = resolve_paths(
@@ -89,26 +92,31 @@ async def _slice_stage(db: AsyncSession, job, payload: dict, file_row: ModelFile
     if any(c for c in colors):
         filament_paths = registry.prepare_filament_files(
             filament_paths, colors, storage.abs_path(f"tmp/slice_job{job.id}"))
-    out_rel = storage.rel_gcode(job.user_id, job.id, file_row.name)
-    out_abs = str(storage.abs_path(out_rel))
     job.log_path = job.log_path or jsvc.log_path_for(job)
     await db.commit()
+    work_dir = storage.abs_path(f"gcode/u{job.user_id}/job{job.id}_slice")
     result = await slice_model(SliceRequest(
         input_path=str(storage.abs_path(file_row.path)),
-        output_gcode=out_abs,
+        output_dir=str(work_dir),
         machine_files=machine_ids,
         filament_files=filament_paths,
         process_file=process_path,
-        plate=payload.get("plate"),
+        plate=int(payload.get("plate") or 0),
         log_path=job.log_path,
     ), exe_path=payload.get("slicer_exe") or "")
     if not result.ok:
         raise PipelineError(result.error)
+    if not result.gcode_path:
+        raise PipelineError("切片完成但未找到 G-code 产物")
+
+    # 把产物从 outputdir 移到正式位置
+    final_rel = storage.rel_gcode(job.user_id, job.id, file_row.name)
+    _shutil.move(result.gcode_path, storage.abs_path(final_rel))
     await jsvc.set_state(
         db, job, "slicing",
         f"切片完成,预估 {int(result.estimated_sec // 60)} 分钟 / "
         f"{result.filament_grams:.0f} g", 0.75)
-    return result, out_rel
+    return result, final_rel
 
 
 async def run_pipeline(db: AsyncSession, job) -> dict:

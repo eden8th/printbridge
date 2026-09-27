@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 
 from app.core.db import SessionLocal
+from app.core.events import bus
 from app.models import Job
 from app.orchestration.pipeline import PipelineError, run_pipeline
 from app.sources.base import SourceAuthError, SourceError
@@ -44,7 +45,15 @@ class JobQueue:
             if job is None or job.state not in ("queued",):
                 return
             try:
-                await run_pipeline(db, job)
+                result = await run_pipeline(db, job)
+                if result:
+                    job.result = {**(job.result or {}), **result}
+                    await db.commit()
+                    await bus.publish("job_update", {
+                        "id": job.id, "kind": job.kind, "state": job.state,
+                        "detail": job.detail, "progress": job.progress,
+                        "error": job.error, "result": job.result,
+                    })
             except SourceAuthError as exc:
                 # 用户可自行解决的凭证问题:直接透传指引文案,不标"内部错误"
                 await job_fetch_and_fail(db, job_id, str(exc))

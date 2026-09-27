@@ -157,24 +157,29 @@ async def cancel_job(job_id: int, db: AsyncSession = Depends(get_db),
 # ---- 切片参数包 --------------------------------------------------------
 @router.get("/profiles")
 async def profiles():
-    """按「机型-喷嘴-耗材/工艺」返回结构化参数包(耗材名/材质已解析)。"""
+    """机型列表(轻量):100+ 机型的耗材/工艺按需经 /profiles/{key}/options 拉取。"""
     from app.slicing.registry import list_bundles
-    out = []
-    for b in list_bundles():
-        out.append({
-            "key": b.key,
-            "name": b.name,
-            "nozzles": [{"nozzle": n.nozzle, "machine_id": n.machine_id}
-                        for n in b.nozzles],
-            "filaments": [{"nozzle": nz,
-                           "items": [{"id": f.id, "name": f.name, "type": f.ftype}
-                                     for f in items]}
-                          for nz, items in sorted(b.filaments.items())],
-            "processes": [{"nozzle": nz,
-                           "items": [{"id": p.id, "name": p.name} for p in items]}
-                          for nz, items in sorted(b.processes.items())],
-        })
-    return out
+    return [{"key": b.key, "name": b.name,
+             "nozzles": [{"nozzle": n.nozzle, "machine_id": n.machine_id}
+                         for n in b.nozzles]}
+            for b in list_bundles()]
+
+
+@router.get("/profiles/{key}/options")
+async def profile_options(key: str, nozzle: str = "0.4"):
+    """指定机型+喷嘴的耗材/工艺列表。"""
+    from app.slicing.registry import get_bundle
+    try:
+        b = get_bundle(key)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {
+        "nozzle": nozzle,
+        "filaments": [{"id": f.id, "name": f.name, "type": f.ftype}
+                      for f in b.filaments.get(nozzle, [])],
+        "processes": [{"id": p.id, "name": p.name}
+                      for p in b.processes.get(nozzle, [])],
+    }
 
 
 # ---- 设置 --------------------------------------------------------------

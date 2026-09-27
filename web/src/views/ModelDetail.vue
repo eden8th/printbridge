@@ -47,12 +47,16 @@ const bundle = computed(() => {
 })
 const modelMissing = computed(() => !!printer.value && !printer.value.settings?.model)
 const nozzles = computed(() => bundle.value?.nozzles || [])
-const filaments = computed(() =>
-  bundle.value?.filaments?.find((f) => f.nozzle === nozzle.value)?.items || [])
-const processes = computed(() =>
-  bundle.value?.processes?.find((f) => f.nozzle === nozzle.value)?.items || [])
 const machineId = computed(() =>
   nozzles.value.find((n) => n.nozzle === nozzle.value)?.machine_id || '')
+
+// 耗材/工艺按需拉取(机型+喷嘴)
+const optionsCache = ref({})
+const optionsKey = computed(() =>
+  bundle.value && nozzle.value ? `${bundle.value.key}|${nozzle.value}` : '')
+const filaments = computed(() => optionsCache.value[optionsKey.value]?.filaments || [])
+const processes = computed(() => optionsCache.value[optionsKey.value]?.processes || [])
+const materialHint = ref('')   // 从模型版本名推断的材质期望
 
 // 常见耗材预设色(无 CFS 料道数据时手动匹配)
 const PRESET_COLORS = [
@@ -92,17 +96,38 @@ function pickDefaults() {
     : (bundle.value.nozzles?.[0]?.nozzle || '')
 }
 
-// 切换喷嘴后,耗材/工艺若在新喷嘴下不存在则重置为默认
-watch(nozzle, () => {
-  if (!filaments.value.some((f) => f.id === filamentId.value)) {
-    filamentId.value = filaments.value.find((f) => f.name === 'CR-PLA')?.id
-      || filaments.value[0]?.id || ''
+async function loadOptions() {
+  if (!bundle.value || !nozzle.value) return
+  const k = optionsKey.value
+  if (optionsCache.value[k]) return ensureDefaults()
+  try {
+    const o = await api.get(
+      `/api/profiles/${bundle.value.key}/options?nozzle=${encodeURIComponent(nozzle.value)}`)
+    optionsCache.value = { ...optionsCache.value, [k]: o }
+  } catch { /* 拉取失败时下拉为空,提交前有校验 */ }
+  ensureDefaults()
+}
+
+function ensureDefaults() {
+  const fil = filaments.value
+  if (!fil.length) return
+  if (materialHint.value) {
+    const f = fil.find((x) => (x.type || '').toUpperCase().includes(materialHint.value))
+    if (f) {
+      filamentId.value = f.id
+      materialHint.value = ''
+      return
+    }
   }
-  if (!processes.value.some((p) => p.id === processId.value)) {
-    processId.value = processes.value.find((p) => p.name.includes('0.20mm Standard'))?.id
-      || processes.value[0]?.id || ''
+  if (!fil.some((x) => x.id === filamentId.value)) {
+    filamentId.value = fil.find((x) => x.name === 'CR-PLA')?.id || fil[0]?.id || ''
   }
-})
+  const pro = processes.value
+  if (!pro.some((x) => x.id === processId.value)) {
+    processId.value = pro.find((x) => x.name.includes('0.20mm Standard'))?.id
+      || pro[0]?.id || ''
+  }
+}
 
 // 换打印机 → 机型/参数包/CFS 状态联动
 watch(printerId, async () => {
@@ -117,14 +142,13 @@ watch(printerId, async () => {
 // 换模型版本 → 自动填充喷嘴/材质
 watch(selected, () => {
   const name = selected.value?.name || ''
+  materialHint.value = inferMaterial(name)
   const nz = inferNozzle(name)
   if (nz && nozzles.value.some((n) => n.nozzle === nz)) nozzle.value = nz
-  const mat = inferMaterial(name)
-  if (mat) {
-    const f = filaments.value.find((x) => (x.type || '').toUpperCase().includes(mat))
-    if (f) filamentId.value = f.id
-  }
 })
+
+// 机型/喷嘴变化 → 拉取对应耗材工艺
+watch([bundle, nozzle], () => loadOptions())
 
 onMounted(async () => {
   try {
