@@ -109,14 +109,19 @@ async def _slice_stage(db: AsyncSession, job, payload: dict, file_row: ModelFile
     if not result.gcode_path:
         raise PipelineError("切片完成但未找到 G-code 产物")
 
-    # 把产物从 outputdir 移到正式位置
+    # 把产物从 outputdir 移到正式位置(缩略图同移,容器与临时文件清理)
     final_rel = storage.rel_gcode(job.user_id, job.id, file_row.name)
     _shutil.move(result.gcode_path, storage.abs_path(final_rel))
+    thumb_rel = ""
+    if result.thumbnail_path:
+        thumb_rel = f"gcode/u{job.user_id}/job{job.id}_thumb.png"
+        _shutil.move(result.thumbnail_path, storage.abs_path(thumb_rel))
+    _shutil.rmtree(work_dir, ignore_errors=True)
     await jsvc.set_state(
         db, job, "slicing",
         f"切片完成,预估 {int(result.estimated_sec // 60)} 分钟 / "
         f"{result.filament_grams:.0f} g", 0.75)
-    return result, final_rel
+    return result, final_rel, thumb_rel
 
 
 async def run_pipeline(db: AsyncSession, job) -> dict:
@@ -141,7 +146,7 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
             return {}
 
     # 2) 切片
-    result, out_rel = await _slice_stage(db, job, payload, file_row)
+    result, out_rel, thumb_rel = await _slice_stage(db, job, payload, file_row)
     if await _check_cancelled(db, job):
         return {}
 
@@ -159,11 +164,13 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
                       kind="gcode",
                       meta={"estimated_sec": result.estimated_sec,
                             "filament_grams": result.filament_grams,
+                            "thumbnail_path": thumb_rel,
                             "job_id": job.id})
         db.add(g)
         await db.commit()
         await jsvc.set_state(db, job, "done", "切片产物已入库", 1.0)
-        return {"gcode_path": out_rel, "gcode_file_id": g.id}
+        return {"gcode_path": out_rel, "gcode_file_id": g.id,
+                "thumbnail_path": thumb_rel}
 
     # 3) 上传 + 打印
     await jsvc.set_state(db, job, "uploading", "上传 G-code 到打印机", 0.8)
@@ -185,5 +192,6 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
     await jsvc.set_state(db, job, "done",
                          "已发送打印指令,可在打印机页观察进度", 1.0)
     return {"gcode_path": out_rel, "remote_file": remote,
+            "thumbnail_path": thumb_rel,
             "estimated_sec": result.estimated_sec,
             "filament_grams": result.filament_grams}

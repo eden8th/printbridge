@@ -145,6 +145,25 @@ async def job_log(job_id: int, db: AsyncSession = Depends(get_db),
             if p.is_file() else ""}
 
 
+@router.get("/jobs/{job_id}/thumbnail")
+async def job_thumbnail(job_id: int, db: AsyncSession = Depends(get_db),
+                        user: User = Depends(current_user)):
+    """打印物品缩略图(切片板预览)。"""
+    from pathlib import Path
+    from fastapi.responses import FileResponse as _FR
+    from app.services import storage
+    j = await db.get(Job, job_id)
+    if j is None or j.user_id != user.id:
+        raise HTTPException(404, "任务不存在")
+    rel = str((j.result or {}).get("thumbnail_path") or "")
+    if not rel:
+        raise HTTPException(404, "该任务没有缩略图")
+    p = storage.abs_path(rel)
+    if not p.is_file():
+        raise HTTPException(404, "缩略图已被清理")
+    return _FR(str(p), media_type="image/png")
+
+
 @router.get("/jobs/{job_id}/gcode")
 async def job_gcode(job_id: int, db: AsyncSession = Depends(get_db),
                     user: User = Depends(current_user)):

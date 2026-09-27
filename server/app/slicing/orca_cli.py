@@ -45,6 +45,7 @@ class SliceRequest:
 class SliceResult:
     ok: bool
     gcode_path: str = ""
+    thumbnail_path: str = ""       # 切片板预览图(从产物容器提取)
     duration_sec: float = 0.0
     estimated_sec: float = 0.0     # G-code 头注释里的预估打印时长
     filament_grams: float = 0.0    # 预估耗材克重
@@ -105,19 +106,33 @@ def _run_sync(req: SliceRequest, exe: str) -> tuple[int, list[str]]:
     return code, tail
 
 
-def _extract_gcode(gcode_3mf: Path, out_dir: Path) -> str:
-    """从 .gcode.3mf 容器里解出最大的 plate_N.gcode。"""
+def _extract_gcode(gcode_3mf: Path, out_dir: Path) -> tuple[str, str]:
+    """从 .gcode.3mf 容器解出最大的 plate_N.gcode 与板预览图。"""
     with zipfile.ZipFile(gcode_3mf) as z:
         members = [i for i in z.infolist()
                    if re.fullmatch(r"Metadata/plate_\d+\.gcode", i.filename)
                    and i.file_size > 0]
         if not members:
-            return ""
+            return "", ""
         best = max(members, key=lambda i: i.file_size)
         target = out_dir / Path(best.filename).name
         with z.open(best) as src, open(target, "wb") as dst:
             shutil.copyfileobj(src, dst)
-        return str(target)
+        # 板预览图:优先 Metadata/plate_N.png,退而取缩略图
+        thumb = ""
+        pngs = [i for i in z.infolist()
+                if re.fullmatch(r"Metadata/plate_\d+\.png", i.filename)]
+        if not pngs:
+            pngs = [i for i in z.infolist()
+                    if i.filename.startswith("Auxiliaries/.thumbnails/")
+                    and i.filename.endswith(".png")]
+        if pngs:
+            png = max(pngs, key=lambda i: i.file_size)
+            thumb_target = out_dir / "plate_thumb.png"
+            with z.open(png) as src, open(thumb_target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            thumb = str(thumb_target)
+        return str(target), thumb
 
 
 async def slice_model(req: SliceRequest, exe_path: str = "") -> SliceResult:
@@ -138,9 +153,10 @@ async def slice_model(req: SliceRequest, exe_path: str = "") -> SliceResult:
 
     container = out_dir / "result.gcode.3mf"
     gcode = ""
+    thumbnail = ""
     if code == 0 and container.is_file():
         try:
-            gcode = _extract_gcode(container, out_dir)
+            gcode, thumbnail = _extract_gcode(container, out_dir)
         except (zipfile.BadZipFile, OSError) as exc:
             return SliceResult(ok=False, duration_sec=round(duration, 1),
                                error=f"切片产物解包失败:{exc!r}", log_tail=tail)
@@ -153,7 +169,8 @@ async def slice_model(req: SliceRequest, exe_path: str = "") -> SliceResult:
                            error=f"切片失败(退出码 {code}):{' | '.join(detail) or '无输出'}",
                            log_tail=tail)
     est, grams = parse_gcode_stats(gcode)
-    return SliceResult(ok=True, gcode_path=gcode, duration_sec=round(duration, 1),
+    return SliceResult(ok=True, gcode_path=gcode, thumbnail_path=thumbnail,
+                       duration_sec=round(duration, 1),
                        estimated_sec=est, filament_grams=grams, log_tail=tail)
 
 

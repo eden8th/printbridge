@@ -150,6 +150,8 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
         <span class="pb-grow"></span>
         <span class="pb-muted">{{ job.detail || job.state }}</span>
       </div>
+      <img v-if="job.result?.thumbnail_path" class="pb-thumbimg"
+           :src="`/api/jobs/${job.id}/thumbnail`" alt="打印预览" />
       <div class="pb-steps">
         <div v-for="(s, i) in steps" :key="s.key" class="pb-row" style="padding:6px 0">
           <van-icon :name="stepIcon(i)" :color="stepColor(i)" size="18" />
@@ -180,7 +182,7 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
           <span class="pb-grow pb-ellipsis">{{ printParams.material }}</span>
         </div>
         <div class="pb-row" v-if="printParams.color">
-          <span class="pb-muted" style="flex:none;width:72px">颜色</span>
+          <span class="pb-muted" style="flex:none;width:72px">切片配色</span>
           <span class="pb-dot" :style="{ background: printParams.color }"></span>
           <span class="pb-grow">
             {{ printParams.colorName || '自定义' }}
@@ -252,6 +254,10 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
 .pb-dot {
   width: 18px; height: 18px; border-radius: 50%; flex: none;
   border: 2px solid #fff; box-shadow: 0 0 0 1px #dcdee0;
+}
+.pb-thumbimg {
+  width: 100%; border-radius: 8px; margin-top: 10px; background: #f2f3f5;
+  max-height: 260px; object-fit: contain; display: block;
 }
 .pb-log {
   background: #0d1117; color: #c9d1d9; font-size: 11px; line-height: 1.5;

@@ -70,10 +70,10 @@ const selectedColorName = computed(() =>
 
 const colorHint = computed(() => {
   if (!cfsInfo.value || cfsInfo.value.available === false)
-    return '常见耗材预设色;切片配色会写入 G-code'
+    return '切片配色写入 G-code;实际供料由打印机当前装料决定'
   if (cfsInfo.value.connected)
-    return 'CFS 料道已识别装料:将从 CFS 供料,请确保所选颜色与料道耗材一致'
-  return '检测到 CFS 能力但未读到料道装料(RFID 未识别或料盒未上电),先用预设色手动匹配'
+    return '⚠️ CFS 机型:打印将使用打印机当前料道的耗材;若与所选颜色不符,请先在打印机端切换料道(料道颜色自动匹配即将上线)'
+  return '检测到 CFS 能力但未读到料道装料(RFID 未识别或料盒未上电);打印将使用当前装料料道'
 })
 
 // 从模型版本名自动推断喷嘴/材质(如 "0.2mm喷嘴, 0.06mm层高")
