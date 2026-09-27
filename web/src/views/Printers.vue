@@ -145,6 +145,7 @@ onUnmounted(() => store.off(onTel))
         <van-tag :color="stateColor[telOf(p)?.state] || '#969799'">
           {{ telOf(p)?.state || '未连接' }}
         </van-tag>
+        <van-tag v-if="telOf(p)?.cfs_connected" color="#ff976a">CFS</van-tag>
       </div>
 
       <div v-if="telOf(p)" class="pb-row" style="margin-top:8px;gap:16px;flex-wrap:wrap">

@@ -176,6 +176,7 @@ def normalize_telemetry(data: dict) -> Telemetry:
     except (TypeError, ValueError):
         remaining = None
 
+    cfs = data.get("cfsConnect")
     return Telemetry(
         state=state,
         nozzle_temp=temp("nozzleTemp", "cur_nozzle_temp", "temp_of_nozzle"),
@@ -188,6 +189,7 @@ def normalize_telemetry(data: dict) -> Telemetry:
         filename=filename,
         remaining_sec=remaining,
         layer=str(_find_first(data, ("layer", "curLayer")) or ""),
+        cfs_connected=bool(cfs) if cfs is not None else None,
         message=str(_find_first(data, ("message", "err_msg")) or ""),
         raw=data,
     )

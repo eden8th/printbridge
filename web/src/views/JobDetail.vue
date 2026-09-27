@@ -62,8 +62,11 @@ function stepColor(i) {
 const sliceInfo = computed(() => {
   const p = job.value?.payload || {}
   if (!p.bundle) return ''
-  const fil = (p.filament_ids || []).join('、')
-  return [p.machine_id, fil, p.process_id].filter(Boolean).join(' · ')
+  const clean = (s) => (s ? String(s).split(' @')[0] : s)
+  const parts = [clean(p.machine_id),
+    ...(p.filament_ids || []).map(clean), clean(p.process_id)].filter(Boolean)
+  const colors = p.filament_colors || []
+  return parts.join(' · ') + (colors[0] ? ` · 颜色 ${colors[0]}` : '')
 })
 
 const fmtMin = (s) => (s ? `${Math.round(s / 60)} 分钟` : '')

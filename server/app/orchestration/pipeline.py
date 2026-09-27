@@ -80,9 +80,15 @@ async def _download_stage(db: AsyncSession, job, payload: dict) -> ModelFile:
 
 async def _slice_stage(db: AsyncSession, job, payload: dict, file_row: ModelFile):
     await jsvc.set_state(db, job, "slicing", "调用切片引擎", 0.4)
+    from app.slicing import registry
     machine_ids, filament_paths, process_path = resolve_paths(
         payload["bundle"], payload["machine_id"],
         payload["filament_ids"], payload["process_id"])
+    # 用户选色:生成覆盖 filament_colour 的耗材配置副本(参与 CFS 料道匹配)
+    colors = payload.get("filament_colors") or []
+    if any(c for c in colors):
+        filament_paths = registry.prepare_filament_files(
+            filament_paths, colors, storage.abs_path(f"tmp/slice_job{job.id}"))
     out_rel = storage.rel_gcode(job.user_id, job.id, file_row.name)
     out_abs = str(storage.abs_path(out_rel))
     job.log_path = job.log_path or jsvc.log_path_for(job)

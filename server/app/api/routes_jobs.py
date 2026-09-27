@@ -12,7 +12,7 @@ from app.core.events import bus
 from app.models import Job, ModelFile, Printer, User
 from app.orchestration import jobs_service as jsvc
 from app.orchestration.queue import queue
-from app.slicing import detect_slicer, list_bundles
+from app.slicing import detect_slicer
 from app.services.settings_service import get_setting, put_setting
 
 router = APIRouter(prefix="/api", tags=["jobs"])
@@ -157,13 +157,22 @@ async def cancel_job(job_id: int, db: AsyncSession = Depends(get_db),
 # ---- 切片参数包 --------------------------------------------------------
 @router.get("/profiles")
 async def profiles():
+    """按「机型-喷嘴-耗材/工艺」返回结构化参数包(耗材名/材质已解析)。"""
+    from app.slicing.registry import list_bundles
     out = []
     for b in list_bundles():
         out.append({
             "key": b.key,
-            "machines": [m.__dict__ for m in b.machines],
-            "filaments": [f.__dict__ for f in b.filaments],
-            "processes": [p.__dict__ for p in b.processes],
+            "name": b.name,
+            "nozzles": [{"nozzle": n.nozzle, "machine_id": n.machine_id}
+                        for n in b.nozzles],
+            "filaments": [{"nozzle": nz,
+                           "items": [{"id": f.id, "name": f.name, "type": f.ftype}
+                                     for f in items]}
+                          for nz, items in sorted(b.filaments.items())],
+            "processes": [{"nozzle": nz,
+                           "items": [{"id": p.id, "name": p.name} for p in items]}
+                          for nz, items in sorted(b.processes.items())],
         })
     return out
 

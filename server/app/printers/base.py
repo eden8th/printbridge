@@ -31,6 +31,7 @@ class Telemetry:
     filename: str = ""
     message: str = ""
     layer: str = ""
+    cfs_connected: bool | None = None   # CFS 多色供料单元在线状态(创想 K 系列)
     remaining_sec: float | None = None
     raw: dict = field(default_factory=dict)
 

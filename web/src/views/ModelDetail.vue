@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { api } from '../api'
@@ -17,9 +17,10 @@ const printers = ref([])
 const profiles = ref([])
 const printerId = ref(null)
 const bundleKey = ref('')
-const machineId = ref('')
+const nozzle = ref('')
 const processId = ref('')
 const filamentId = ref('')
+const color = ref('#E3E3E3')
 const autoStart = ref(true)
 const hasToken = ref(true)   // 未拉到设置前默认有,避免误拦
 
@@ -38,13 +39,30 @@ async function ensureToken() {
   return false
 }
 
-const bundles = computed(() => profiles.value)
-const machines = computed(() =>
-  (profiles.value.find((b) => b.key === bundleKey.value)?.machines) || [])
-const processes = computed(() =>
-  (profiles.value.find((b) => b.key === bundleKey.value)?.processes) || [])
+const bundle = computed(() => profiles.value.find((b) => b.key === bundleKey.value))
+const nozzles = computed(() => bundle.value?.nozzles || [])
 const filaments = computed(() =>
-  (profiles.value.find((b) => b.key === bundleKey.value)?.filaments) || [])
+  bundle.value?.filaments?.find((f) => f.nozzle === nozzle.value)?.items || [])
+const processes = computed(() =>
+  bundle.value?.processes?.find((f) => f.nozzle === nozzle.value)?.items || [])
+const machineId = computed(() =>
+  nozzles.value.find((n) => n.nozzle === nozzle.value)?.machine_id || '')
+const cfsConnected = computed(() => {
+  const t = store.printers[printerId.value]
+  return !!(t && t.cfs_connected)
+})
+
+// 切换喷嘴后,耗材/工艺若在新喷嘴下不存在则重置为默认
+watch(nozzle, () => {
+  if (!filaments.value.some((f) => f.id === filamentId.value)) {
+    filamentId.value = filaments.value.find((f) => f.name === 'CR-PLA')?.id
+      || filaments.value[0]?.id || ''
+  }
+  if (!processes.value.some((p) => p.id === processId.value)) {
+    processId.value = processes.value.find((p) => p.name.includes('0.20mm Standard'))?.id
+      || processes.value[0]?.id || ''
+  }
+})
 
 onMounted(async () => {
   try {
@@ -59,12 +77,9 @@ onMounted(async () => {
     }).catch(() => {})
     if (pr.length) {
       bundleKey.value = pr[0].key
-      machineId.value = pr[0].machines.find((m) => m.id.includes('0.4'))?.id
-        || pr[0].machines[0]?.id || ''
-      processId.value = pr[0].processes.find((m) => m.name.includes('0.20mm Standard'))?.id
-        || pr[0].processes[0]?.id || ''
-      filamentId.value = pr[0].filaments.find((m) => m.name === 'CR-PLA')?.id
-        || pr[0].filaments[0]?.id || ''
+      nozzle.value = pr[0].nozzles?.some((n) => n.nozzle === '0.4') ? '0.4'
+        : (pr[0].nozzles?.[0]?.nozzle || '')
+      // nozzle 的 watch 会自动补齐耗材/工艺默认值
     }
     if (ps.length) printerId.value = ps[0].id
   } catch (e) {
@@ -76,6 +91,8 @@ onMounted(async () => {
 
 async function submitOneClick() {
   if (!(await ensureToken())) return
+  if (!machineId.value) return showFailToast('请选择喷嘴直径')
+  if (!filamentId.value) return showFailToast('请选择耗材材质')
   try {
     const res = await api.post('/api/jobs/oneclick', {
       source: route.params.source,
@@ -84,7 +101,8 @@ async function submitOneClick() {
       printer_id: printerId.value,
       bundle: bundleKey.value,
       machine_id: machineId.value,
-      filament_ids: filamentId.value ? [filamentId.value] : [],
+      filament_ids: [filamentId.value],
+      filament_colors: [color.value],
       process_id: processId.value,
       auto_start: autoStart.value,
     })
@@ -155,19 +173,37 @@ async function importOnly() {
       <van-cell title="打印机" is-link
                 :value="printers.find((p) => p.id === printerId)?.name || '请先添加打印机'"
                 @click="!printers.length && router.push('/printers')" />
-      <van-cell title="机型参数包" is-link :value="bundleKey" disabled />
-      <van-field label="机器配置" readonly>
+      <van-cell title="机型" :value="bundle?.name || bundleKey" />
+      <van-field label="喷嘴直径" readonly>
         <template #input>
-          <select v-model="machineId" class="pb-select">
-            <option v-for="m in machines" :key="m.id" :value="m.id">{{ m.name }}</option>
+          <van-radio-group v-model="nozzle" direction="horizontal">
+            <van-radio v-for="n in nozzles" :key="n.nozzle" :name="n.nozzle">
+              {{ n.nozzle }} mm
+            </van-radio>
+          </van-radio-group>
+        </template>
+      </van-field>
+      <van-field label="耗材材质" readonly>
+        <template #input>
+          <select v-model="filamentId" class="pb-select">
+            <option v-for="f in filaments" :key="f.id" :value="f.id">
+              {{ f.name }}{{ f.type ? `(${f.type})` : '' }}
+            </option>
           </select>
         </template>
       </van-field>
-      <van-field label="耗材" readonly>
+      <van-field label="打印颜色" readonly>
         <template #input>
-          <select v-model="filamentId" class="pb-select">
-            <option v-for="f in filaments" :key="f.id" :value="f.id">{{ f.name }}</option>
-          </select>
+          <div class="pb-colors">
+            <span v-for="c in PRESET_COLORS" :key="c" class="pb-dot"
+                  :class="{ active: color.toLowerCase() === c }"
+                  :style="{ background: c }" @click="color = c"></span>
+            <label class="pb-dot pb-dot-custom" :style="{ background: color }"
+                   title="自定义颜色">
+              <input type="color" v-model="color" style="display:none" />
+              <van-icon name="plus" color="#fff" />
+            </label>
+          </div>
         </template>
       </van-field>
       <van-field label="工艺层厚" readonly>
@@ -177,6 +213,9 @@ async function importOnly() {
           </select>
         </template>
       </van-field>
+      <div v-if="cfsConnected" class="pb-muted" style="padding:2px 4px 6px">
+        🎨 CFS 已连接:开始打印前请确认所选颜色的料道已装载耗材
+      </div>
       <van-cell title="切片后自动开始打印">
         <template #right-icon>
           <van-switch v-model="autoStart" size="22" />
@@ -199,4 +238,12 @@ async function importOnly() {
 <style scoped>
 .summary :deep(img) { max-width: 100%; }
 .pb-select { width: 100%; border: 1px solid #ebedf0; border-radius: 6px; padding: 4px 8px; }
+.pb-colors { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pb-dot {
+  width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px #dcdee0; display: inline-flex;
+  align-items: center; justify-content: center;
+}
+.pb-dot.active { box-shadow: 0 0 0 2px var(--pb-primary); }
+.pb-dot-custom { box-shadow: inset 0 0 0 1px rgba(255,255,255,.6), 0 0 0 1px #dcdee0; }
 </style>
