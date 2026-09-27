@@ -9,6 +9,26 @@ const region = ref('cn')
 const slicerPath = ref('')
 const slicerProbe = ref(null)
 const settingsPath = ref(false)
+const verifying = ref(false)
+const verifyResult = ref('')
+
+async function verifyToken() {
+  const token = makerworldToken.value.trim()
+  if (!token) {
+    verifyResult.value = '请先粘贴 token'
+    return
+  }
+  verifying.value = true
+  try {
+    const r = await api.post('/api/settings/verify-makerworld', { token })
+    verifyResult.value = r.valid === true ? '✅ ' + r.detail
+      : r.valid === false ? '❌ ' + r.detail : '⚠️ ' + r.detail
+  } catch (e) {
+    verifyResult.value = e.message
+  } finally {
+    verifying.value = false
+  }
+}
 
 onMounted(async () => {
   const s = await api.get('/api/settings')
@@ -42,10 +62,13 @@ async function saveSlicer() {
 
     <div class="pb-card">
       <h3 class="pb-title">MakerWorld(拓竹)凭证</h3>
-      <div class="pb-muted" style="margin-bottom:8px">
-        浏览器登录 makerworld.com(或 makerworld.com.cn)后,F12 → Application →
-        Cookies,复制 <b>token</b> 的值粘贴到这里。仅用于在你自己设备上拉取模型,
-        平台不存储账号、不二次分发文件。
+      <div class="pb-muted" style="margin-bottom:8px;line-height:1.7">
+        <b>获取步骤(电脑浏览器):</b><br />
+        ① 打开 makerworld.com 并登录你的账号<br />
+        ② 按 <b>F12</b> 打开开发者工具,切到「应用程序 / Application」标签<br />
+        ③ 左侧展开「Cookie」→ 点选 https://makerworld.com<br />
+        ④ 在列表里找到名为 <b>token</b> 的行,复制它的值粘贴到下面<br />
+        下载模型必须配这个凭证;它只保存在你自己的设备上,平台不托管账号。
       </div>
       <van-field v-model="makerworldToken" label="token"
                  :placeholder="hasToken ? '已配置(输入新值可更换)' : '粘贴 Cookie 中的 token'" />
@@ -57,9 +80,11 @@ async function saveSlicer() {
           </van-radio-group>
         </template>
       </van-field>
-      <van-button type="primary" size="small" style="margin:8px 16px" @click="saveMakerworld">
-        保存
-      </van-button>
+      <div style="margin:8px 16px" class="pb-row">
+        <van-button type="primary" size="small" @click="saveMakerworld">保存</van-button>
+        <van-button size="small" plain :loading="verifying" @click="verifyToken">验证</van-button>
+        <span v-if="verifyResult" class="pb-muted">{{ verifyResult }}</span>
+      </div>
     </div>
 
     <div class="pb-card">

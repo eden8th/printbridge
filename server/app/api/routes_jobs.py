@@ -161,3 +161,30 @@ async def slicer_probe(db: AsyncSession = Depends(get_db),
     cfg = await get_setting(db, "app")
     path = detect_slicer(str(cfg.get("slicer_exe") or ""))
     return {"found": bool(path), "path": path}
+
+
+class VerifyTokenBody(BaseModel):
+    token: str
+
+
+@router.post("/settings/verify-makerworld")
+async def verify_makerworld(body: VerifyTokenBody):
+    """校验 MakerWorld token 是否有效(设计详情接口带凭证自查)。"""
+    import httpx
+    token = (body.token or "").strip()
+    if not token:
+        return {"valid": False, "detail": "token 为空"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.bambulab.cn/v1/design-user-service/my/preference",
+                headers={"Authorization": f"Bearer {token}",
+                         "Referer": "https://makerworld.com/",
+                         "User-Agent": "Mozilla/5.0"})
+    except httpx.HTTPError as exc:
+        return {"valid": None, "detail": f"网络错误,无法校验:{exc}"}
+    if r.status_code == 200:
+        return {"valid": True, "detail": "token 有效"}
+    if r.status_code in (401, 403):
+        return {"valid": False, "detail": "token 无效或已过期,请重新复制"}
+    return {"valid": None, "detail": f"无法确认(HTTP {r.status_code}),仍可保存后试下载"}

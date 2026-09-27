@@ -6,6 +6,7 @@ import asyncio
 from app.core.db import SessionLocal
 from app.models import Job
 from app.orchestration.pipeline import PipelineError, run_pipeline
+from app.sources.base import SourceAuthError, SourceError
 
 
 class JobQueue:
@@ -44,6 +45,11 @@ class JobQueue:
                 return
             try:
                 await run_pipeline(db, job)
+            except SourceAuthError as exc:
+                # 用户可自行解决的凭证问题:直接透传指引文案,不标"内部错误"
+                await job_fetch_and_fail(db, job_id, str(exc))
+            except SourceError as exc:
+                await job_fetch_and_fail(db, job_id, f"模型源错误:{exc}")
             except PipelineError as exc:
                 await job_fetch_and_fail(db, job_id, str(exc))
             except Exception as exc:

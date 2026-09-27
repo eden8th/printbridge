@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showFailToast, showSuccessToast } from 'vant'
+import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { api } from '../api'
 import { store } from '../store'
 
@@ -21,6 +21,22 @@ const machineId = ref('')
 const processId = ref('')
 const filamentId = ref('')
 const autoStart = ref(true)
+const hasToken = ref(true)   // 未拉到设置前默认有,避免误拦
+
+// 从模型源下载需要用户本人凭证:没配则当场引导,避免任务提交后失败
+async function ensureToken() {
+  if (hasToken.value) return true
+  try {
+    await showConfirmDialog({
+      title: '需要配置拓竹凭证',
+      message: '下载 MakerWorld 模型需要你本人的账号 token(仅保存在本机,平台不托管账号)。现在去「设置」页配置?',
+      confirmButtonText: '去配置',
+      cancelButtonText: '取消',
+    })
+    router.push('/settings')
+  } catch { /* 用户取消 */ }
+  return false
+}
 
 const bundles = computed(() => profiles.value)
 const machines = computed(() =>
@@ -38,6 +54,9 @@ onMounted(async () => {
     const [ps, pr] = await Promise.all([api.get('/api/printers'), api.get('/api/profiles')])
     printers.value = ps
     profiles.value = pr
+    api.get('/api/settings').then((s) => {
+      hasToken.value = !!s.makerworld?.token
+    }).catch(() => {})
     if (pr.length) {
       bundleKey.value = pr[0].key
       machineId.value = pr[0].machines.find((m) => m.id.includes('0.4'))?.id
@@ -56,6 +75,7 @@ onMounted(async () => {
 })
 
 async function submitOneClick() {
+  if (!(await ensureToken())) return
   try {
     const res = await api.post('/api/jobs/oneclick', {
       source: route.params.source,
@@ -77,6 +97,7 @@ async function submitOneClick() {
 }
 
 async function importOnly() {
+  if (!(await ensureToken())) return
   try {
     await api.post('/api/library/import', {
       source: route.params.source,
