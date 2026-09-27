@@ -15,6 +15,35 @@ const form = ref({
   settings: {},
 })
 
+// 局域网自动发现
+const scanning = ref(false)
+const scanHint = ref('')
+const candidates = ref([])
+
+async function scanLan() {
+  scanning.value = true
+  scanHint.value = '正在扫描(约 5 秒)...'
+  candidates.value = []
+  try {
+    const r = await api.post('/api/printers/discover', {})
+    candidates.value = r.candidates || []
+    scanHint.value = candidates.value.length
+      ? `扫描完成,发现 ${candidates.value.length} 台设备,点击填入`
+      : `未发现设备(已扫描 ${(r.scanned || []).join('、')}),可手动填写`
+  } catch (e) {
+    scanHint.value = `扫描失败:${e.message}`
+  } finally {
+    scanning.value = false
+  }
+}
+
+function applyCandidate(c) {
+  form.value.name = c.name
+  form.value.adapter = c.adapter
+  form.value.host = c.host
+  form.value.port = c.port
+}
+
 async function load() {
   printers.value = await api.get('/api/printers')
   adapters.value = await api.get('/api/printers/adapters')
@@ -145,6 +174,29 @@ onUnmounted(() => store.off(onTel))
 
     <van-dialog v-model:show="showForm" :title="editing ? '编辑打印机' : '添加打印机'"
                 show-cancel-button @confirm="save" style="padding:8px">
+      <div style="padding:0 4px">
+        <van-button size="small" type="primary" plain :loading="scanning"
+                    style="margin-bottom:8px" @click="scanLan">
+          扫描局域网
+        </van-button>
+        <div v-if="candidates.length" class="pb-scan-list">
+          <van-cell v-for="(c, i) in candidates" :key="c.host + ':' + c.port" clickable
+                    center @click="applyCandidate(c)">
+            <template #title>
+              <span style="font-weight:600">{{ c.name }}</span>
+            </template>
+            <template #label>
+              {{ c.host }}:{{ c.port }} · {{ c.adapter }}
+              <span v-if="c.detail?.alt_adapters?.length" class="pb-muted">
+                (也支持 {{ c.detail.alt_adapters.join('/') }})</span>
+            </template>
+            <template #right-icon>
+              <van-icon name="arrow" color="#c8c9cc" />
+            </template>
+          </van-cell>
+        </div>
+        <div v-if="scanHint" class="pb-muted" style="padding:0 4px 6px">{{ scanHint }}</div>
+      </div>
       <van-field v-model="form.name" label="名称" placeholder="客厅 K2 Plus" />
       <van-field label="适配器" readonly>
         <template #input>

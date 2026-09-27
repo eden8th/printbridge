@@ -138,14 +138,22 @@ def _find_first(obj, keys: tuple[str, ...], depth: int = 0):
 
 
 def normalize_telemetry(data: dict) -> Telemetry:
-    state_raw = str(_find_first(data, ("status", "machineStatus", "state")) or "unknown").lower()
-    state = ("printing" if state_raw in ("printing", "print", "working")
-             else "paused" if "pause" in state_raw
-             else "finished" if state_raw in ("complete", "completed", "finish", "done")
-             else "error" if state_raw in ("error", "failed", "abort")
-             else "idle" if state_raw in ("idle", "standby", "ready", "free")
-             else state_raw if state_raw in ("offline", "unknown") else "unknown")
-    prog = _find_first(data, ("progress", "percent", "printProgress"))
+    """字段名以 K2 Pro 实机帧为准(2026-09 对 192.168.8.220 实测校准),
+    同时保留 K1 系列社区已知的旧字段名兜底。"""
+    state_raw = data.get("state") if isinstance(data.get("state"), (int, float)) else \
+        str(_find_first(data, ("status", "machineStatus")) or "").lower()
+    # K 系列 state 枚举(实测:打印完成时为 2;0=待机,1=打印中 为社区通用值)
+    if isinstance(state_raw, (int, float)):
+        state = {0: "idle", 1: "printing", 2: "finished", 3: "paused"}.get(
+            int(state_raw), "unknown")
+    else:
+        state = ("printing" if state_raw in ("printing", "print", "working")
+                 else "paused" if "pause" in state_raw
+                 else "finished" if state_raw in ("complete", "completed", "finish", "done")
+                 else "error" if state_raw in ("error", "failed", "abort")
+                 else "idle" if state_raw in ("idle", "standby", "ready", "free")
+                 else state_raw if state_raw in ("offline", "unknown") else "unknown")
+    prog = _find_first(data, ("printProgress", "progress", "percent"))
     try:
         prog = float(prog)
         if prog > 1.0:
@@ -160,15 +168,26 @@ def normalize_telemetry(data: dict) -> Telemetry:
         except (TypeError, ValueError):
             return None
 
+    filename_full = str(_find_first(data, ("printFileName", "filename", "gcode_filename")) or "")
+    filename = filename_full.rsplit("/", 1)[-1] if filename_full else ""
+    remaining = _find_first(data, ("printLeftTime", "remaining_time"))
+    try:
+        remaining = float(remaining) if remaining is not None else None
+    except (TypeError, ValueError):
+        remaining = None
+
     return Telemetry(
         state=state,
-        nozzle_temp=temp("nozzleTemp", "cur_nozzle_temp", "nozzle_temp", "temp_of_nozzle"),
-        nozzle_target=temp("nozzleTargetTemp", "target_nozzle_temp", "dest_nozzle_temp"),
-        bed_temp=temp("bedTemp", "cur_heatbed_temp", "bed_temp", "temp_of_heatbed"),
-        bed_target=temp("bedTargetTemp", "target_bed_temp", "dest_heatbed_temp"),
-        chamber_temp=temp("chamberTemp", "cur_chamber_temp", "chamber_temp"),
+        nozzle_temp=temp("nozzleTemp", "cur_nozzle_temp", "temp_of_nozzle"),
+        nozzle_target=temp("targetNozzleTemp", "dest_nozzle_temp", "nozzleTargetTemp"),
+        bed_temp=temp("bedTemp0", "cur_heatbed_temp", "temp_of_heatbed"),
+        bed_target=temp("targetBedTemp0", "dest_heatbed_temp", "bedTargetTemp"),
+        chamber_temp=temp("boxTemp", "cur_chamber_temp", "chamberTemp"),
+        chamber_target=temp("targetBoxTemp", "target_chamber_temp"),
         progress=prog,
-        filename=str(_find_first(data, ("filename", "gcode_filename", "printName")) or ""),
+        filename=filename,
+        remaining_sec=remaining,
+        layer=str(_find_first(data, ("layer", "curLayer")) or ""),
         message=str(_find_first(data, ("message", "err_msg")) or ""),
         raw=data,
     )

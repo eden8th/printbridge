@@ -49,7 +49,8 @@ class MoonrakerAdapter(PrinterAdapter):
             raise PrinterError(f"Moonraker 连接失败:{exc}") from exc
         if resp.status_code != 200:
             raise PrinterError(f"Moonraker 返回 {resp.status_code}")
-        data = resp.json().get("status", {})
+        # 响应结构:{"result": {"status": {...}, "eventtime": ...}}
+        data = resp.json().get("result", {}).get("status", {})
         ps = data.get("print_stats", {})
         disp = data.get("display_status", {})
         ext = data.get("extruder", {})

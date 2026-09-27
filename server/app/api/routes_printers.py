@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import current_user, get_db
 from app.models import ModelFile, Printer, User
 from app.printers import adapter_keys, build_adapter, manager
+from app.printers.discovery import discover
 from app.services import storage
 
 router = APIRouter(prefix="/api/printers", tags=["printers"])
@@ -53,6 +54,19 @@ async def list_printers(db: AsyncSession = Depends(get_db),
 @router.get("/adapters")
 async def list_adapters():
     return adapter_keys()
+
+
+class DiscoverBody(BaseModel):
+    cidr: str | None = None   # 可选,如 192.168.8.0/24;默认自动探测本机网段
+
+
+@router.post("/discover")
+async def discover_printers(body: DiscoverBody):
+    """扫描局域网,自动发现创想 K 系列 / Klipper(Moonraker)打印机。只读探测。"""
+    try:
+        return await discover(body.cidr)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("")

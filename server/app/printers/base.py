@@ -26,6 +26,7 @@ class Telemetry:
     bed_temp: float | None = None
     bed_target: float | None = None
     chamber_temp: float | None = None
+    chamber_target: float | None = None
     progress: float | None = None
     filename: str = ""
     message: str = ""
