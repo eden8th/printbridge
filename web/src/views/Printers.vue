@@ -6,6 +6,7 @@ import { store } from '../store'
 
 const printers = ref([])
 const adapters = ref([])
+const models = ref([])     // 可选机型(= 切片参数包列表)
 const showForm = ref(false)
 const testing = ref(false)
 const editing = ref(null)
@@ -42,16 +43,27 @@ function applyCandidate(c) {
   form.value.adapter = c.adapter
   form.value.host = c.host
   form.value.port = c.port
+  // 发现时按主机名匹配到的机型(如 K2Pro-29BB → Creality K2 Pro)
+  if (c.detail?.model) form.value.settings.model = c.detail.model
+  else if (!form.value.settings.model && models.value.length)
+    form.value.settings.model = models.value[0].key
 }
 
 async function load() {
   printers.value = await api.get('/api/printers')
   adapters.value = await api.get('/api/printers/adapters')
+  try {
+    const pr = await api.get('/api/profiles')
+    models.value = pr.map((b) => ({ key: b.key, name: b.name }))
+  } catch { models.value = [] }
 }
 
 function openAdd() {
   editing.value = null
-  form.value = { name: '', adapter: 'creality_ws', host: '', port: null, secret: '', settings: {} }
+  form.value = {
+    name: '', adapter: 'creality_ws', host: '', port: null, secret: '',
+    settings: { model: models.value[0]?.key || '' },
+  }
   showForm.value = true
 }
 
@@ -59,7 +71,8 @@ function openEdit(p) {
   editing.value = p.id
   form.value = {
     name: p.name, adapter: p.adapter, host: p.host, port: p.port,
-    secret: p.secret || '', settings: p.settings || {},
+    secret: p.secret || '',
+    settings: { model: p.settings?.model || models.value[0]?.key || '' },
   }
   showForm.value = true
 }
@@ -203,6 +216,13 @@ onUnmounted(() => store.off(onTel))
         <template #input>
           <select v-model="form.adapter" class="pb-select">
             <option v-for="a in adapters" :key="a.key" :value="a.key">{{ a.name }}</option>
+          </select>
+        </template>
+      </van-field>
+      <van-field label="机型" readonly>
+        <template #input>
+          <select v-model="form.settings.model" class="pb-select">
+            <option v-for="m in models" :key="m.key" :value="m.key">{{ m.name }}</option>
           </select>
         </template>
       </van-field>

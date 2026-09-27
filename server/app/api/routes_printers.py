@@ -109,6 +109,24 @@ async def delete_printer(printer_id: int, db: AsyncSession = Depends(get_db),
     return {"ok": True}
 
 
+@router.get("/{printer_id}/cfs")
+async def printer_cfs(printer_id: int, db: AsyncSession = Depends(get_db),
+                      user: User = Depends(current_user)):
+    """CFS 料道状态(connected=True 时 raw 内含已识别的颜色/材质)。"""
+    p = await db.get(Printer, printer_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(404, "打印机不存在")
+    adapter = build_adapter(p)
+    try:
+        result = await adapter.cfs_status()
+        return result or {"available": False, "connected": False, "raw": {}}
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "connected": False, "error": str(exc)}
+    finally:
+        if hasattr(adapter, "aclose"):
+            await adapter.aclose()
+
+
 @router.post("/{printer_id}/test")
 async def test_printer(printer_id: int, db: AsyncSession = Depends(get_db),
                        user: User = Depends(current_user)):

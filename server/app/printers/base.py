@@ -70,3 +70,11 @@ class PrinterAdapter(ABC):
     def stream(self) -> AsyncIterator[Telemetry]:
         """持续遥测流;不支持主动推送的实现可轮询。"""
         raise NotImplementedError
+
+    async def cfs_status(self) -> dict | None:
+        """CFS 料道状态;不适配的实现返回 None。
+
+        返回 {"available": bool, "connected": bool, "raw": {...}},
+        connected=True 表示当前有已识别(RFID)的装料料道。
+        """
+        return None

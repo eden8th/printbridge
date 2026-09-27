@@ -44,7 +44,8 @@ class MoonrakerAdapter(PrinterAdapter):
         try:
             resp = await self._client.get("/printer/objects/query", params={
                 "print_stats": None, "extruder": None,
-                "heater_bed": None, "display_status": None})
+                "heater_bed": None, "display_status": None,
+                "filament_rack": None})  # 创想 K 系列魔改:CFS 料架对象
         except httpx.HTTPError as exc:
             raise PrinterError(f"Moonraker 连接失败:{exc}") from exc
         if resp.status_code != 200:
@@ -55,6 +56,11 @@ class MoonrakerAdapter(PrinterAdapter):
         disp = data.get("display_status", {})
         ext = data.get("extruder", {})
         bed = data.get("heater_bed", {})
+        # filament_rack 存在即代表该固件具备 CFS 能力;color_value!="-1" 表示已装料
+        rack = data.get("filament_rack")
+        cfs = None
+        if rack is not None:
+            cfs = str(rack.get("color_value") or "-1") != "-1"
         return Telemetry(
             state=_STATE_MAP.get(str(ps.get("state")), "unknown"),
             nozzle_temp=_f(ext.get("temperature")), nozzle_target=_f(ext.get("target")),
@@ -62,8 +68,25 @@ class MoonrakerAdapter(PrinterAdapter):
             progress=_f(disp.get("progress")),
             filename=str(ps.get("filename") or ""),
             message=str(ps.get("message") or ""),
+            cfs_connected=cfs,
             raw=data,
         )
+
+    async def cfs_status(self) -> dict | None:
+        """CFS 料道状态。料盒装料被 RFID 识别后 color_value 才有真实值。"""
+        try:
+            resp = await self._client.get(
+                "/printer/objects/query?filament_rack")
+            rack = (resp.json().get("result", {}).get("status") or {}).get(
+                "filament_rack")
+        except (httpx.HTTPError, ValueError):
+            return None
+        if rack is None:
+            return None
+        color = str(rack.get("color_value") or "-1")
+        material = str(rack.get("material_type") or "-1")
+        loaded = color not in ("-1", "") and material not in ("-1", "")
+        return {"available": True, "connected": loaded, "raw": rack}
 
     async def send_file(self, local_path: str, remote_name: str) -> str:
         p = Path(local_path)

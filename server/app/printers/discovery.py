@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import re
 import socket
 import time
 
@@ -121,6 +122,20 @@ async def _probe_creality(host: str, port: int) -> dict | None:
             }}
 
 
+def _match_bundle_key(text: str) -> str | None:
+    """按发现到的名字/主机名模糊匹配已知机型参数包(K2Pro-29BB → creality_k2pro)。"""
+    from app.slicing.registry import list_bundles
+    norm = re.sub(r"[^a-z0-9]", "", (text or "").lower())
+    if not norm:
+        return None
+    for b in list_bundles():
+        bn = re.sub(r"[^a-z0-9]", "", b.name.lower())   # "Creality K2 Pro" -> crealityk2pro
+        short = bn.replace("creality", "")
+        if short and short in norm:
+            return b.key
+    return None
+
+
 async def _probe_moonraker(host: str, port: int) -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
@@ -139,6 +154,7 @@ async def _probe_moonraker(host: str, port: int) -> dict | None:
                     "name": f"Klipper · {hostname or host}", "detail": {
                         "hostname": hostname,
                         "software_version": version,
+                        "model": _match_bundle_key(hostname),
                     }}
     except (OSError, httpx.HTTPError):
         return None

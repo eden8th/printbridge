@@ -16,13 +16,13 @@ const showPrint = ref(false)
 const printers = ref([])
 const profiles = ref([])
 const printerId = ref(null)
-const bundleKey = ref('')
 const nozzle = ref('')
 const processId = ref('')
 const filamentId = ref('')
-const color = ref('#E3E3E3')
+const color = ref('#F2F2F2')
 const autoStart = ref(true)
 const hasToken = ref(true)   // 未拉到设置前默认有,避免误拦
+const cfsInfo = ref(null)    // 打印机 CFS 料道状态
 
 // 从模型源下载需要用户本人凭证:没配则当场引导,避免任务提交后失败
 async function ensureToken() {
@@ -39,7 +39,13 @@ async function ensureToken() {
   return false
 }
 
-const bundle = computed(() => profiles.value.find((b) => b.key === bundleKey.value))
+// 机型参数包跟随所选打印机的机型(打印机设置里选择)
+const printer = computed(() => printers.value.find((p) => p.id === printerId.value))
+const bundle = computed(() => {
+  const key = printer.value?.settings?.model
+  return profiles.value.find((b) => b.key === key) || profiles.value[0] || null
+})
+const modelMissing = computed(() => !!printer.value && !printer.value.settings?.model)
 const nozzles = computed(() => bundle.value?.nozzles || [])
 const filaments = computed(() =>
   bundle.value?.filaments?.find((f) => f.nozzle === nozzle.value)?.items || [])
@@ -47,10 +53,44 @@ const processes = computed(() =>
   bundle.value?.processes?.find((f) => f.nozzle === nozzle.value)?.items || [])
 const machineId = computed(() =>
   nozzles.value.find((n) => n.nozzle === nozzle.value)?.machine_id || '')
-const cfsConnected = computed(() => {
-  const t = store.printers[printerId.value]
-  return !!(t && t.cfs_connected)
+
+// 常见耗材预设色(无 CFS 料道数据时手动匹配)
+const PRESET_COLORS = [
+  { c: '#1A1A1A', n: '黑' }, { c: '#F2F2F2', n: '白' }, { c: '#8C8C8C', n: '灰' },
+  { c: '#D32F2F', n: '红' }, { c: '#F57C00', n: '橙' }, { c: '#FBC02D', n: '黄' },
+  { c: '#388E3C', n: '绿' }, { c: '#1976D2', n: '蓝' }, { c: '#7B1FA2', n: '紫' },
+  { c: '#795548', n: '棕' },
+]
+const selectedColorName = computed(() =>
+  PRESET_COLORS.find((c) => c.c.toLowerCase() === (color.value || '').toLowerCase())?.n || '自定义')
+
+const colorHint = computed(() => {
+  if (!cfsInfo.value || cfsInfo.value.available === false)
+    return '常见耗材预设色;切片配色会写入 G-code'
+  if (cfsInfo.value.connected)
+    return 'CFS 料道已识别装料:将从 CFS 供料,请确保所选颜色与料道耗材一致'
+  return '检测到 CFS 能力但未读到料道装料(RFID 未识别或料盒未上电),先用预设色手动匹配'
 })
+
+// 从模型版本名自动推断喷嘴/材质(如 "0.2mm喷嘴, 0.06mm层高")
+function inferNozzle(name) {
+  const s = String(name || '')
+  let m = s.match(/(\d+(?:\.\d+)?)\s*mm?\s*(?:喷嘴|喷头|nozzle)/i)
+  if (!m) m = s.match(/(?:喷嘴|喷头|nozzle)\s*[:：]?\s*(\d+(?:\.\d+)?)/i)
+  return m ? m[1] : ''
+}
+function inferMaterial(name) {
+  const s = String(name || '').toUpperCase()
+  for (const t of ['PETG', 'ABS', 'PLA', 'TPU', 'NYLON', 'ASA', 'PA-CF', 'PLA-CF'])
+    if (s.includes(t)) return t
+  return ''
+}
+
+function pickDefaults() {
+  if (!bundle.value) return
+  nozzle.value = bundle.value.nozzles?.some((n) => n.nozzle === '0.4') ? '0.4'
+    : (bundle.value.nozzles?.[0]?.nozzle || '')
+}
 
 // 切换喷嘴后,耗材/工艺若在新喷嘴下不存在则重置为默认
 watch(nozzle, () => {
@@ -61,6 +101,28 @@ watch(nozzle, () => {
   if (!processes.value.some((p) => p.id === processId.value)) {
     processId.value = processes.value.find((p) => p.name.includes('0.20mm Standard'))?.id
       || processes.value[0]?.id || ''
+  }
+})
+
+// 换打印机 → 机型/参数包/CFS 状态联动
+watch(printerId, async () => {
+  pickDefaults()
+  cfsInfo.value = null
+  if (printerId.value) {
+    try { cfsInfo.value = await api.get(`/api/printers/${printerId.value}/cfs`) }
+    catch { cfsInfo.value = null }
+  }
+})
+
+// 换模型版本 → 自动填充喷嘴/材质
+watch(selected, () => {
+  const name = selected.value?.name || ''
+  const nz = inferNozzle(name)
+  if (nz && nozzles.value.some((n) => n.nozzle === nz)) nozzle.value = nz
+  const mat = inferMaterial(name)
+  if (mat) {
+    const f = filaments.value.find((x) => (x.type || '').toUpperCase().includes(mat))
+    if (f) filamentId.value = f.id
   }
 })
 
@@ -75,12 +137,6 @@ onMounted(async () => {
     api.get('/api/settings').then((s) => {
       hasToken.value = !!s.makerworld?.token
     }).catch(() => {})
-    if (pr.length) {
-      bundleKey.value = pr[0].key
-      nozzle.value = pr[0].nozzles?.some((n) => n.nozzle === '0.4') ? '0.4'
-        : (pr[0].nozzles?.[0]?.nozzle || '')
-      // nozzle 的 watch 会自动补齐耗材/工艺默认值
-    }
     if (ps.length) printerId.value = ps[0].id
   } catch (e) {
     showFailToast(e.message)
@@ -91,6 +147,7 @@ onMounted(async () => {
 
 async function submitOneClick() {
   if (!(await ensureToken())) return
+  if (!bundle.value) return showFailToast('打印机未设置机型:请到「打印机→编辑」选择')
   if (!machineId.value) return showFailToast('请选择喷嘴直径')
   if (!filamentId.value) return showFailToast('请选择耗材材质')
   try {
@@ -99,7 +156,7 @@ async function submitOneClick() {
       design_id: route.params.id,
       instance_id: selected.value?.instance_id,
       printer_id: printerId.value,
-      bundle: bundleKey.value,
+      bundle: bundle.value.key,
       machine_id: machineId.value,
       filament_ids: [filamentId.value],
       filament_colors: [color.value],
@@ -171,9 +228,12 @@ async function importOnly() {
     <van-popup v-model:show="showPrint" position="bottom" round style="padding:16px">
       <h3 class="pb-title">一键打印配置</h3>
       <van-cell title="打印机" is-link
-                :value="printers.find((p) => p.id === printerId)?.name || '请先添加打印机'"
+                :value="printer?.name || '请先添加打印机'"
                 @click="!printers.length && router.push('/printers')" />
-      <van-cell title="机型" :value="bundle?.name || bundleKey" />
+      <van-cell title="机型" :value="bundle?.name || '未设置'" />
+      <div v-if="modelMissing" class="pb-muted" style="padding:0 16px 4px">
+        该打印机未设置机型,当前使用默认参数包;可在「打印机 → 编辑」中选择正确机型
+      </div>
       <van-field label="喷嘴直径" readonly>
         <template #input>
           <van-radio-group v-model="nozzle" direction="horizontal">
@@ -195,17 +255,15 @@ async function importOnly() {
       <van-field label="打印颜色" readonly>
         <template #input>
           <div class="pb-colors">
-            <span v-for="c in PRESET_COLORS" :key="c" class="pb-dot"
-                  :class="{ active: color.toLowerCase() === c }"
-                  :style="{ background: c }" @click="color = c"></span>
-            <label class="pb-dot pb-dot-custom" :style="{ background: color }"
-                   title="自定义颜色">
-              <input type="color" v-model="color" style="display:none" />
-              <van-icon name="plus" color="#fff" />
-            </label>
+            <span v-for="c in PRESET_COLORS" :key="c.c" class="pb-dot"
+                  :class="{ active: color.toLowerCase() === c.c }"
+                  :style="{ background: c.c }" :title="c.n" @click="color = c.c"></span>
           </div>
         </template>
       </van-field>
+      <div class="pb-muted" style="padding:0 16px 4px">
+        {{ selectedColorName }} · {{ colorHint }}
+      </div>
       <van-field label="工艺层厚" readonly>
         <template #input>
           <select v-model="processId" class="pb-select">
@@ -213,9 +271,6 @@ async function importOnly() {
           </select>
         </template>
       </van-field>
-      <div v-if="cfsConnected" class="pb-muted" style="padding:2px 4px 6px">
-        🎨 CFS 已连接:开始打印前请确认所选颜色的料道已装载耗材
-      </div>
       <van-cell title="切片后自动开始打印">
         <template #right-icon>
           <van-switch v-model="autoStart" size="22" />
@@ -245,5 +300,4 @@ async function importOnly() {
   align-items: center; justify-content: center;
 }
 .pb-dot.active { box-shadow: 0 0 0 2px var(--pb-primary); }
-.pb-dot-custom { box-shadow: inset 0 0 0 1px rgba(255,255,255,.6), 0 0 0 1px #dcdee0; }
 </style>
