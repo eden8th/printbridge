@@ -171,15 +171,4 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
   width: 14px; height: 14px; border-radius: 50%; flex: none;
   border: 1.5px solid #fff; box-shadow: 0 0 0 1px #dcdee0;
 }
-.pb-batchbar {
-  position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: 60px; z-index: 90;
-  width: min(92vw, 560px);
-  background: #fff; border-radius: 12px; padding: 10px 16px;
-  box-shadow: 0 4px 16px rgba(16,24,40,.16);
-  display: flex; align-items: center; justify-content: space-between;
-}
-@media (min-width: 768px) {
-  .pb-batchbar { bottom: 20px; width: 560px; }
-}
 </style>

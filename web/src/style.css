@@ -52,3 +52,16 @@ body {
   .pb-cols { display: grid; grid-template-columns: 5fr 7fr; gap: 16px; align-items: start; }
   .pb-cols > * { margin-bottom: 0; }
 }
+
+/* ===== 批量操作浮动栏 ===== */
+.pb-batchbar {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: 60px; z-index: 90;
+  width: min(92vw, 560px);
+  background: #fff; border-radius: 12px; padding: 10px 16px;
+  box-shadow: 0 4px 16px rgba(16,24,40,.16);
+  display: flex; align-items: center; justify-content: space-between;
+}
+@media (min-width: 768px) {
+  .pb-batchbar { bottom: 20px; width: 560px; }
+}

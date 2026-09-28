@@ -113,8 +113,12 @@ async def download_file(file_id: int, db: AsyncSession = Depends(get_db),
 @router.delete("/library/{model_id}")
 async def delete_model(model_id: int, db: AsyncSession = Depends(get_db),
                        user: User = Depends(current_user)):
-    m = await db.get(ModelRecord, model_id)
-    if m is None or m.user_id != user.id:
+    res = await db.execute(
+        select(ModelRecord).where(ModelRecord.id == model_id,
+                                  ModelRecord.user_id == user.id)
+        .options(selectinload(ModelRecord.files)))
+    m = res.scalar_one_or_none()
+    if m is None:
         raise HTTPException(404, "模型不存在")
     for f in m.files:  # 删除磁盘文件
         try:
@@ -125,6 +129,35 @@ async def delete_model(model_id: int, db: AsyncSession = Depends(get_db),
     await db.commit()
     await bus.publish("library_update", {"deleted": model_id})
     return {"ok": True}
+
+
+class LibraryBatchDeleteBody(BaseModel):
+    ids: list[int]
+
+
+@router.post("/library/batch-delete")
+async def batch_delete_models(body: LibraryBatchDeleteBody,
+                              db: AsyncSession = Depends(get_db),
+                              user: User = Depends(current_user)):
+    """批量删除模型(含磁盘文件)。"""
+    if not body.ids:
+        return {"deleted": 0}
+    res = await db.execute(
+        select(ModelRecord).where(ModelRecord.id.in_(body.ids),
+                                  ModelRecord.user_id == user.id)
+        .options(selectinload(ModelRecord.files)))
+    records = res.scalars().all()
+    for m in records:
+        for f in m.files:
+            try:
+                storage.abs_path(f.path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        await db.delete(m)
+    await db.commit()
+    if deleted_ids := [m.id for m in records]:
+        await bus.publish("library_update", {"deleted": deleted_ids})
+    return {"deleted": len(deleted_ids)}
 
 
 class UploadBody(BaseModel):
