@@ -95,6 +95,18 @@ const printParams = computed(() => {
 
 const fmtMin = (s) => (s ? `${Math.round(s / 60)} 分钟` : '')
 
+// 流水线失败原因的友好诊断
+function diagnoseError(e) {
+  const s = String(e || '')
+  if (/凭证|token/i.test(s)) return 'MakerWorld 凭证问题:去「设置」页更新 token 后重试'
+  if (/下载/.test(s)) return '模型下载失败:多为网络波动或凭证失效,重试通常可解决'
+  if (/切片失败|切片器/.test(s)) return '切片引擎执行失败:下方日志含具体原因,把日志发给我们可以修复'
+  if (/换料|料道/.test(s)) return 'CFS 换料失败:确认料道已装料、打印机在线后重试'
+  if (/上传/.test(s)) return 'G-code 上传失败:检查打印机是否在线'
+  return ''
+}
+const failureHint = computed(() => diagnoseError(job.value?.error))
+
 async function load() {
   try {
     job.value = await api.get(`/api/jobs/${route.params.id}`)
@@ -163,6 +175,17 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
                     :percentage="Math.round(job.progress * 100)" />
       <div v-if="job.error" style="margin-top:10px;color:#ee0a24;font-size:13px">
         ⚠️ {{ job.error }}
+        <div v-if="failureHint" class="pb-muted" style="color:#969799;margin-top:2px">
+          💡 {{ failureHint }}
+        </div>
+      </div>
+      <div v-if="job.result?.print_status" class="pb-row"
+           style="margin-top:10px;padding:8px;background:#f7f8fa;border-radius:8px">
+        <span class="pb-muted" style="flex:none;width:72px">打印结果</span>
+        <span class="pb-grow" style="font-size:13px"
+              :style="{ color: job.result.print_status === 'completed' ? '#07c160' : '#ee0a24' }">
+          {{ job.result.print_diagnosis }}
+        </span>
       </div>
     </div>
 

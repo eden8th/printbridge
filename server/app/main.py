@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
     yield
     await manager.shutdown()
     await queue.stop()
+    from app.services.print_watch import cancel_all
+    cancel_all()
 
 
 app = FastAPI(title="PrintBridge", version="0.1.0", lifespan=lifespan)

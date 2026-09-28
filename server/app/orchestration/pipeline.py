@@ -195,6 +195,9 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
                 jsvc.append_log(job, f"[CFS] 料道切换失败:{exc}")
         if payload.get("auto_start", True):
             await adapter.start_print(remote)
+            # 跟踪打印最终结果(klippy_shutdown/error/completed),写回任务详情
+            from app.services.print_watch import start_watcher
+            start_watcher(job.id, printer.id, remote)
     finally:
         if hasattr(adapter, "aclose"):
             await adapter.aclose()
