@@ -89,6 +89,7 @@ const printParams = computed(() => {
     colorName: COLOR_NAMES[color.toLowerCase()] || '',
     process: clean(p.process_id),
     multi: (p.filament_ids || []).length > 1,
+    cfsTnn: p.cfs_tnn || '',
   }
 })
 
@@ -192,6 +193,10 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
         <div class="pb-row" v-if="printParams.process">
           <span class="pb-muted" style="flex:none;width:72px">工艺</span>
           <span class="pb-grow pb-ellipsis">{{ printParams.process }}</span>
+        </div>
+        <div class="pb-row" v-if="printParams.cfsTnn">
+          <span class="pb-muted" style="flex:none;width:72px">CFS 料道</span>
+          <span class="pb-grow">打印前自动换料至 {{ printParams.cfsTnn }}</span>
         </div>
       </template>
       <div class="pb-row" v-else-if="sliceInfo">

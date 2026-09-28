@@ -183,6 +183,16 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
         remote_name = f"printbridge_{uuid.uuid4().hex[:8]}.gcode"
         remote = await adapter.send_file(str(storage.abs_path(out_rel)), remote_name)
         await jsvc.set_state(db, job, "uploading", "上传完成", 0.95)
+        # CFS 自动换料:用户选了料道时,启动打印前先切换(与屏幕「进料」同一宏链)
+        tnn = str(payload.get("cfs_tnn") or "").strip().upper()
+        if tnn and payload.get("auto_start", True):
+            await jsvc.set_state(db, job, "uploading",
+                                 f"切换 CFS 料道 {tnn}(约 20-60 秒)", 0.97)
+            try:
+                await adapter.select_slot(tnn)
+                jsvc.append_log(job, f"[CFS] 已切换到料道 {tnn}")
+            except Exception as exc:  # noqa: BLE001  换料失败不阻塞打印
+                jsvc.append_log(job, f"[CFS] 料道切换失败:{exc}")
         if payload.get("auto_start", True):
             await adapter.start_print(remote)
     finally:

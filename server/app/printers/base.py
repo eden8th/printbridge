@@ -74,7 +74,11 @@ class PrinterAdapter(ABC):
     async def cfs_status(self) -> dict | None:
         """CFS 料道状态;不适配的实现返回 None。
 
-        返回 {"available": bool, "connected": bool, "raw": {...}},
+        返回 {"available": bool, "connected": bool, "boxes": [...], "raw": {...}},
         connected=True 表示当前有已识别(RFID)的装料料道。
         """
         return None
+
+    async def select_slot(self, tnn: str) -> dict:
+        """自动换料到指定料道(如 T1A);不适配的实现抛错。"""
+        raise PrinterError("该打印机不支持料道切换")

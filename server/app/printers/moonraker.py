@@ -140,6 +140,28 @@ class MoonrakerAdapter(PrinterAdapter):
             raw=data,
         )
 
+    async def select_slot(self, tnn: str) -> dict:
+        """自动换料:执行 BOX_EXTRUDE_MATERIAL TNN=<盒子><料道>(如 T1C)。
+
+        K2 内部 box_wrapper 模块的原生换料命令(实测验证,~20-60 秒):
+        内部完成加热/退旧料/进新料/冲洗。注意:必须直发本命令并带 TNN
+        参数——经 BOX_LOAD_MATERIAL 等宏间接调用会丢 TNN 导致内部错误。
+        """
+        import re as _re
+        tnn = str(tnn or "").strip().upper()
+        if not _re.fullmatch(r"T\d[A-D]", tnn):
+            raise PrinterError(f"料道标识无效:{tnn}")
+        try:
+            resp = await self._client.post(
+                "/printer/gcode/script",
+                json={"script": f"BOX_EXTRUDE_MATERIAL TNN={tnn}"},
+                timeout=httpx.Timeout(180.0))
+        except httpx.HTTPError as exc:
+            raise PrinterError(f"换料指令发送失败:{exc}") from exc
+        if resp.status_code != 200:
+            raise PrinterError(f"换料指令被拒绝({resp.status_code}):{resp.text[:200]}")
+        return {"ok": True, "tnn": tnn}
+
     async def cfs_status(self) -> dict | None:
         """CFS 料道状态:优先 SSH 只读读取料盒文件(颜色/材质/名称),
         未配置 SSH 密码时回退到 filament_rack 对象(仅 RFID 读取瞬间有值)。"""

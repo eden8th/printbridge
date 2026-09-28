@@ -20,6 +20,7 @@ const nozzle = ref('')
 const processId = ref('')
 const filamentId = ref('')
 const color = ref('#F2F2F2')
+const cfsTnn = ref('')      // 选中的 CFS 料道(如 T1A),打印前自动换料
 const autoStart = ref(true)
 const hasToken = ref(true)   // 未拉到设置前默认有,避免误拦
 const cfsInfo = ref(null)    // 打印机 CFS 料道状态
@@ -86,9 +87,15 @@ const cfsSlots = computed(() => {
 
 function pickCfsSlot(s) {
   color.value = s.color
+  cfsTnn.value = `${s.box}${s.slot}`
   const f = filaments.value.find((x) =>
     (x.type || '').toUpperCase().includes((s.material || '').toUpperCase()))
   if (f) filamentId.value = f.id
+}
+
+function pickPreset(c) {
+  color.value = c.c
+  cfsTnn.value = ''   // 手动预设色:不指定料道
 }
 
 const colorHint = computed(() => {
@@ -210,6 +217,7 @@ async function submitOneClick() {
       filament_ids: [filamentId.value],
       filament_colors: [color.value],
       process_id: processId.value,
+      cfs_tnn: cfsTnn.value || null,
       auto_start: autoStart.value,
     })
     showPrint.value = false
@@ -316,7 +324,7 @@ async function importOnly() {
             </template>
             <span v-for="c in PRESET_COLORS" :key="c.c" class="pb-dot"
                   :class="{ active: color.toLowerCase() === c.c }"
-                  :style="{ background: c.c }" :title="c.n" @click="color = c.c"></span>
+                  :style="{ background: c.c }" :title="c.n" @click="pickPreset(c)"></span>
           </div>
         </template>
       </van-field>
@@ -330,6 +338,9 @@ async function importOnly() {
           </select>
         </template>
       </van-field>
+      <div v-if="cfsTnn" class="pb-muted" style="padding:0 16px 4px">
+        🎯 打印前将自动换料到 CFS 料道 <b>{{ cfsTnn }}</b>(与屏幕「进料」同一流程,约 20-60 秒)
+      </div>
       <van-cell title="切片后自动开始打印">
         <template #right-icon>
           <van-switch v-model="autoStart" size="22" />

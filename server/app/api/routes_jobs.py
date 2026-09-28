@@ -29,9 +29,11 @@ class OneClickBody(BaseModel):
     bundle: str
     machine_id: str
     filament_ids: list[str]
+    filament_colors: list[str] = []
     process_id: str
     plate: int | None = None
     auto_start: bool = True
+    cfs_tnn: str | None = None        # CFS 料道(如 T1A),打印前自动换料
 
 
 @router.post("/jobs/oneclick")
@@ -56,6 +58,7 @@ class SliceOnlyBody(BaseModel):
     filament_colors: list[str] = []
     process_id: str
     plate: int | None = None
+    cfs_tnn: str | None = None
 
 
 @router.post("/jobs/slice")

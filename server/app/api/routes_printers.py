@@ -127,6 +127,28 @@ async def printer_cfs(printer_id: int, db: AsyncSession = Depends(get_db),
             await adapter.aclose()
 
 
+class SelectSlotBody(BaseModel):
+    tnn: str          # 如 T1A(盒子T1 料道A)
+
+
+@router.post("/{printer_id}/select-slot")
+async def select_slot(printer_id: int, body: SelectSlotBody,
+                      db: AsyncSession = Depends(get_db),
+                      user: User = Depends(current_user)):
+    """自动换料到指定 CFS 料道(与打印机屏幕「进料」同一宏链,约 20-60 秒)。"""
+    p = await db.get(Printer, printer_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(404, "打印机不存在")
+    adapter = build_adapter(p)
+    try:
+        return await adapter.select_slot(body.tnn)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, str(exc)) from exc
+    finally:
+        if hasattr(adapter, "aclose"):
+            await adapter.aclose()
+
+
 @router.post("/{printer_id}/test")
 async def test_printer(printer_id: int, db: AsyncSession = Depends(get_db),
                        user: User = Depends(current_user)):
