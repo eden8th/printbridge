@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { api } from '../api'
@@ -7,6 +7,8 @@ import { store } from '../store'
 
 const router = useRouter()
 const jobs = ref([])
+const batchMode = ref(false)
+const selected = ref(new Set())
 
 async function load() {
   try {
@@ -25,6 +27,48 @@ const stateColor = {
 function progressText(j) {
   if (j.progress) return `${Math.round(j.progress * 100)}%`
   return ''
+}
+
+const selectable = (j) => ['done', 'failed', 'cancelled'].includes(j.state)
+
+function toggleBatch() {
+  batchMode.value = !batchMode.value
+  selected.value = new Set()
+}
+
+function toggleSelect(j) {
+  if (!selectable(j)) return
+  const s = new Set(selected.value)
+  if (s.has(j.id)) s.delete(j.id)
+  else s.add(j.id)
+  selected.value = s
+}
+
+const selectableIds = computed(() => jobs.value.filter(selectable).map((j) => j.id))
+const allSelected = computed(() =>
+  selectableIds.value.length > 0 && selectableIds.value.every((id) => selected.value.has(id)))
+
+function toggleAll() {
+  selected.value = new Set(allSelected.value ? [] : selectableIds.value)
+}
+
+async function batchDelete() {
+  if (!selected.value.size) return
+  try {
+    await showConfirmDialog({
+      title: '批量删除',
+      message: `确定删除所选 ${selected.value.size} 个任务?记录与日志将一并删除。`,
+    })
+  } catch { return }
+  try {
+    const r = await api.post('/api/jobs/batch-delete', { ids: [...selected.value] })
+    showSuccessToast(`已删除 ${r.deleted} 个${r.skipped ? `(跳过进行中 ${r.skipped} 个)` : ''}`)
+    batchMode.value = false
+    selected.value = new Set()
+    load()
+  } catch (e) {
+    showFailToast(e.message)
+  }
 }
 
 async function cancelJob(j) {
@@ -61,27 +105,40 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
 
 <template>
   <div class="pb-page">
-    <van-nav-bar title="打印任务" />
+    <van-nav-bar title="打印任务">
+      <template #right>
+        <span class="pb-navbar-action" role="button"
+              @click="jobs.length && toggleBatch()">
+          {{ batchMode ? '退出管理' : '批量管理' }}
+        </span>
+      </template>
+    </van-nav-bar>
 
     <van-empty v-if="!jobs.length" description="还没有任务。去「发现」页挑个模型一键打印吧" />
 
     <div class="pb-grid">
       <div v-for="j in jobs" :key="j.id" class="pb-card clickable"
-           @click="router.push(`/jobs/${j.id}`)">
+           @click="batchMode ? toggleSelect(j) : router.push(`/jobs/${j.id}`)">
         <div class="pb-row">
+          <van-checkbox v-if="batchMode" :model-value="selected.has(j.id)"
+                        :disabled="!selectable(j)" checked-color="#1989fa"
+                        style="margin-right:4px"
+                        @click.stop @update:model-value="toggleSelect(j)" />
           <van-tag :color="stateColor[j.state] || '#969799'">{{ j.state }}</van-tag>
           <span v-if="(j.payload?.filament_colors || [])[0]" class="pb-listdot"
                 :style="{ background: j.payload.filament_colors[0] }"></span>
           <div class="pb-grow pb-ellipsis" style="font-weight:600">
             #{{ j.id }} {{ j.kind === 'slice' ? '切片任务' : '一键打印' }}
           </div>
-          <van-button v-if="!['done', 'failed', 'cancelled'].includes(j.state)"
-                      size="mini" plain type="warning" @click.stop="cancelJob(j)">
-            取消
-          </van-button>
-          <van-button v-else size="mini" plain type="danger" @click.stop="delJob(j)">
-            删除
-          </van-button>
+          <template v-if="!batchMode">
+            <van-button v-if="!['done', 'failed', 'cancelled'].includes(j.state)"
+                        size="mini" plain type="warning" @click.stop="cancelJob(j)">
+              取消
+            </van-button>
+            <van-button v-else size="mini" plain type="danger" @click.stop="delJob(j)">
+              删除
+            </van-button>
+          </template>
         </div>
         <div class="pb-muted" style="margin-top:6px">
           {{ j.detail || j.error || '等待中' }}
@@ -91,9 +148,19 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
                       :percentage="Math.round(j.progress * 100)" style="margin-top:8px" />
         <div class="pb-muted pb-row" style="margin-top:6px">
           <span class="pb-grow">{{ new Date(j.created_at).toLocaleString('zh-CN') }}</span>
-          <span>详情 <van-icon name="arrow" /></span>
+          <span v-if="!batchMode">详情 <van-icon name="arrow" /></span>
         </div>
       </div>
+    </div>
+
+    <!-- 批量操作栏 -->
+    <div v-if="batchMode && jobs.length" class="pb-batchbar">
+      <van-checkbox :model-value="allSelected" checked-color="#1989fa"
+                    @update:model-value="toggleAll">全选(可删任务)</van-checkbox>
+      <van-button type="danger" size="small" round :disabled="!selected.size"
+                  @click="batchDelete">
+        删除所选({{ selected.size }})
+      </van-button>
     </div>
   </div>
 </template>
@@ -103,5 +170,16 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
 .pb-listdot {
   width: 14px; height: 14px; border-radius: 50%; flex: none;
   border: 1.5px solid #fff; box-shadow: 0 0 0 1px #dcdee0;
+}
+.pb-batchbar {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: 60px; z-index: 90;
+  width: min(92vw, 560px);
+  background: #fff; border-radius: 12px; padding: 10px 16px;
+  box-shadow: 0 4px 16px rgba(16,24,40,.16);
+  display: flex; align-items: center; justify-content: space-between;
+}
+@media (min-width: 768px) {
+  .pb-batchbar { bottom: 20px; width: 560px; }
 }
 </style>

@@ -167,6 +167,35 @@ async def job_thumbnail(job_id: int, db: AsyncSession = Depends(get_db),
     return _FR(str(p), media_type="image/png")
 
 
+class BatchDeleteBody(BaseModel):
+    ids: list[int]
+
+
+@router.post("/jobs/batch-delete")
+async def batch_delete_jobs(body: BatchDeleteBody,
+                            db: AsyncSession = Depends(get_db),
+                            user: User = Depends(current_user)):
+    """批量删除任务(仅限已结束的任务;进行中的跳过并计数)。"""
+    from pathlib import Path
+    deleted_ids = []
+    skipped = 0
+    for jid in body.ids:
+        j = await db.get(Job, jid)
+        if j is None or j.user_id != user.id:
+            continue
+        if j.state not in ("done", "failed", "cancelled"):
+            skipped += 1
+            continue
+        if j.log_path:
+            Path(j.log_path).unlink(missing_ok=True)
+        await db.delete(j)
+        deleted_ids.append(jid)
+    await db.commit()
+    if deleted_ids:
+        await bus.publish("jobs_batch_deleted", {"ids": deleted_ids})
+    return {"deleted": len(deleted_ids), "skipped": skipped}
+
+
 @router.get("/jobs/{job_id}/gcode")
 async def job_gcode(job_id: int, db: AsyncSession = Depends(get_db),
                     user: User = Depends(current_user)):
