@@ -61,14 +61,17 @@ function fmt(n) {
 
 <template>
   <div class="pb-page">
-    <van-search v-model="keyword" placeholder="搜索 MakerWorld 模型,如:龙、花瓶、手机支架"
-                show-action @search="doSearch()">
-      <template #action>
-        <van-dropdown-menu style="flex:none">
-          <van-dropdown-item v-model="sort" :options="sorts" @change="doSearch()" />
-        </van-dropdown-menu>
-      </template>
-    </van-search>
+    <div class="pb-card pb-searchcard">
+      <van-search v-model="keyword" placeholder="搜索模型:龙、花瓶、手机支架…"
+                  @search="doSearch()" />
+      <div class="pb-filters">
+        <span v-for="s in sorts" :key="s.value" class="pb-chip"
+              :class="{ active: sort === s.value }"
+              @click="sort = s.value; doSearch()">
+          {{ s.text }}
+        </span>
+      </div>
+    </div>
 
     <van-empty v-if="!items.length && !loading" description="输入关键词开始探索" />
 
@@ -102,5 +105,18 @@ function fmt(n) {
 
 <style scoped>
 .clickable { cursor: pointer; }
-.van-search { padding-left: 0; }
+.pb-searchcard { padding: 6px 8px 10px; }
+.pb-searchcard :deep(.van-search) { padding: 4px 0 0; background: transparent; }
+.pb-searchcard :deep(.van-search__content) {
+  border-radius: 10px; background: #f2f3f5;
+}
+.pb-filters {
+  display: flex; gap: 8px; padding: 8px 10px 0; flex-wrap: wrap;
+}
+.pb-chip {
+  font-size: 12px; padding: 4px 12px; border-radius: 14px; cursor: pointer;
+  background: #f2f3f5; color: #4b5563; user-select: none;
+  transition: background .15s, color .15s;
+}
+.pb-chip.active { background: #e8f1ff; color: var(--pb-primary); font-weight: 600; }
 </style>

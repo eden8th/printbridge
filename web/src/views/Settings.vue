@@ -18,7 +18,6 @@ const mwAccount = ref('')
 const mwPassword = ref('')
 const loggingIn = ref(false)
 const loginResult = ref('')
-const openFaq = ref([])
 
 // 方式二:书签脚本(在 makerworld.com 页面上读取 token 复制到剪贴板)
 const bookmarklet = computed(() => {
@@ -107,8 +106,8 @@ async function saveSlicer() {
 
       <!-- 方式一:账号密码登录 -->
       <div class="pb-method">
-        <div class="pb-method-tag">方式一 · 推荐</div>
-        <b>账号密码登录</b>(全自动,密码不保存)
+        <div class="pb-method-tag" v-if="!isMobile">方式一 · 推荐</div>
+        <b>账号密码登录</b><span v-if="!isMobile">(全自动,密码不保存)</span>
         <van-field v-model="mwAccount" label="账号" placeholder="手机号 / 邮箱" clearable />
         <van-field v-model="mwPassword" label="密码" type="password" placeholder="拓竹账号密码"
                    clearable />
@@ -123,8 +122,7 @@ async function saveSlicer() {
 
       <!-- 方式二:书签脚本(PC 浏览器专属;H5 仅支持账号密码) -->
       <div class="pb-method" v-if="!isMobile">
-        <div class="pb-method-tag">方式二</div>
-        <b>一键提取书签</b>(账号触发验证码时用)
+        <div class="pb-method-tag">方式二</div>        <b>一键提取书签</b>(账号触发验证码时用)
         <div class="pb-muted" style="margin:4px 0;line-height:1.6">
           ① 把下面的橙色按钮<b>拖到浏览器书签栏</b> →
           ② 打开并登录 <a href="https://makerworld.com" target="_blank" rel="noopener">makerworld.com</a> →
@@ -137,17 +135,17 @@ async function saveSlicer() {
                    :placeholder="hasToken ? '已配置(输入新值可更换)' : '粘贴复制的 token'" />
       </div>
 
-      <!-- 方式三:F12(PC 专属备用;H5 仅支持账号密码) -->
-      <van-collapse v-model="openFaq" v-if="!isMobile">
-        <van-collapse-item title="方式三 · F12 手动获取(备用)" name="f12">
-          <div class="pb-muted" style="line-height:1.7">
-            ① 电脑浏览器打开 makerworld.com 并登录<br />
-            ② 按 <b>F12</b> 打开开发者工具,切到「应用程序 / Application」标签<br />
-            ③ 左侧展开「Cookie」→ 点选 https://makerworld.com<br />
-            ④ 找到名为 <b>token</b> 的行,复制它的值粘贴到上面
-          </div>
-        </van-collapse-item>
-      </van-collapse>
+      <!-- 方式三:F12(PC 专属备用;H5 仅支持账号密码)——样式与方式二统一 -->
+      <div class="pb-method" v-if="!isMobile">
+        <div class="pb-method-tag">方式三 · 备用</div>
+        <b>F12 手动获取</b>
+        <div class="pb-muted" style="line-height:1.7;margin:4px 0">
+          ① 电脑浏览器打开 makerworld.com 并登录<br />
+          ② 按 <b>F12</b> 打开开发者工具,切到「应用程序 / Application」标签<br />
+          ③ 左侧展开「Cookie」→ 点选 https://makerworld.com<br />
+          ④ 找到名为 <b>token</b> 的行,复制它的值粘贴到方式二的输入框
+        </div>
+      </div>
 
       <van-field label="站点" readonly>
         <template #input>
@@ -159,7 +157,7 @@ async function saveSlicer() {
       </van-field>
       <div style="margin:8px 16px">
         <van-button type="primary" size="small" @click="saveMakerworld">保存手填内容</van-button>
-        <span class="pb-muted" style="margin-left:8px">凭证只保存在你自己的设备上,平台不托管账号</span>
+        <span class="pb-muted" style="margin-left:8px">凭证仅保存在本设备</span>
       </div>
     </div>
 
