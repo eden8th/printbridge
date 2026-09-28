@@ -1,18 +1,32 @@
 :root {
   --pb-primary: #1989fa;
+  --pb-success: #07c160;
+  --pb-danger: #ee0a24;
+  --pb-bg: #f5f6f8;
+  --pb-card-bg: #fff;
+  --pb-radius: 14px;
+  --pb-shadow: 0 1px 3px rgba(16, 24, 40, .06), 0 1px 2px rgba(16, 24, 40, .04);
 }
 * { box-sizing: border-box; }
-html, body, #app { height: 100%; margin: 0; background: #f7f8fa; }
+html, body, #app { min-height: 100%; margin: 0; background: var(--pb-bg); }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     'PingFang SC', 'Microsoft YaHei', sans-serif;
   -webkit-tap-highlight-color: transparent;
+  color: #1f2329;
 }
-#app { max-width: 720px; margin: 0 auto; position: relative; }
+
+/* ===== 页面容器:H5 全宽 / PC 居中限宽 ===== */
 .pb-page { padding: 12px 12px 90px; }
+@media (min-width: 768px) {
+  .pb-page { max-width: 1140px; margin: 0 auto; padding: 20px 24px 60px; }
+}
+
+/* ===== 卡片 ===== */
 .pb-card {
-  background: #fff; border-radius: 12px; padding: 12px;
-  margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.05);
+  background: var(--pb-card-bg); border-radius: var(--pb-radius);
+  padding: 14px; margin-bottom: 12px; box-shadow: var(--pb-shadow);
+  border: 1px solid rgba(16, 24, 40, .04);
 }
 .pb-title { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
 .pb-muted { color: #969799; font-size: 12px; }
@@ -22,3 +36,19 @@ body {
 .pb-thumb { width: 84px; height: 84px; border-radius: 8px; object-fit: cover; background: #eef0f3; flex: none; }
 .pb-navbar-action { font-size: 14px; color: var(--pb-primary); padding: 6px 2px; cursor: pointer; }
 .pb-scan-list { max-height: 200px; overflow: auto; border: 1px solid #ebedf0; border-radius: 8px; margin-bottom: 8px; }
+
+/* ===== 多列网格:列表类卡片 H5 单列 / PC 多列 ===== */
+.pb-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 768px) {
+  .pb-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+}
+@media (min-width: 1100px) {
+  .pb-grid { grid-template-columns: repeat(3, 1fr); }
+}
+.pb-grid .pb-card { margin-bottom: 0; }
+
+/* ===== 双栏布局(PC 详情类页面)===== */
+@media (min-width: 768px) {
+  .pb-cols { display: grid; grid-template-columns: 5fr 7fr; gap: 16px; align-items: start; }
+  .pb-cols > * { margin-bottom: 0; }
+}

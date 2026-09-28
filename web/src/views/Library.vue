@@ -58,24 +58,26 @@ onUnmounted(() => store.off(onLib))
 
     <van-empty v-if="!models.length" description="还没有模型,去「发现」页搜索,或点右上角上传" />
 
-    <div v-for="m in models" :key="m.id" class="pb-card">
-      <div class="pb-row">
-        <img v-if="m.cover" class="pb-thumb" :src="m.cover" loading="lazy" />
-        <div class="pb-grow">
-          <div style="font-weight:600" class="pb-ellipsis">{{ m.title }}</div>
-          <div class="pb-muted pb-ellipsis" style="margin-top:4px">
-            {{ m.source }} · @{{ m.author || '-' }}
+    <div class="pb-grid">
+      <div v-for="m in models" :key="m.id" class="pb-card">
+        <div class="pb-row">
+          <img v-if="m.cover" class="pb-thumb" :src="m.cover" loading="lazy" />
+          <div class="pb-grow">
+            <div style="font-weight:600" class="pb-ellipsis">{{ m.title }}</div>
+            <div class="pb-muted pb-ellipsis" style="margin-top:4px">
+              {{ m.source }} · @{{ m.author || '-' }}
+            </div>
           </div>
+          <van-icon name="delete-o" color="#ee0a24" size="20" @click="del(m)" />
         </div>
-        <van-icon name="delete-o" color="#ee0a24" size="20" @click="del(m)" />
-      </div>
-      <div v-for="f in m.files" :key="f.id"
-           class="pb-row" style="margin-top:8px;background:#f7f8fa;border-radius:8px;padding:8px">
-        <van-icon name="description" size="18" />
-        <div class="pb-grow pb-ellipsis pb-muted">{{ f.name }} · {{ fmtSize(f.size) }}</div>
-        <a :href="`/api/library/files/${f.id}/download`">
-          <van-button size="mini" plain>下载</van-button>
-        </a>
+        <div v-for="f in m.files" :key="f.id"
+             class="pb-row" style="margin-top:8px;background:#f7f8fa;border-radius:8px;padding:8px">
+          <van-icon name="description" size="18" />
+          <div class="pb-grow pb-ellipsis pb-muted">{{ f.name }} · {{ fmtSize(f.size) }}</div>
+          <a :href="`/api/library/files/${f.id}/download`">
+            <van-button size="mini" plain>下载</van-button>
+          </a>
+        </div>
       </div>
     </div>
   </div>

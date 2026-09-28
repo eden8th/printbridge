@@ -74,23 +74,25 @@ function fmt(n) {
 
     <van-cell v-if="total" :title="`共 ${total} 个结果`" class="pb-muted" />
 
-    <div v-for="it in items" :key="it.id" class="pb-card pb-row clickable"
-         @click="router.push(`/model/makerworld/${it.id}`)">
-      <img class="pb-thumb" :src="it.cover" loading="lazy" />
-      <div class="pb-grow">
-        <div style="font-weight:600" class="pb-ellipsis">{{ it.title }}</div>
-        <div class="pb-muted pb-ellipsis" style="margin-top:4px">@{{ it.author || '匿名' }}</div>
-        <div class="pb-muted" style="margin-top:6px">
-          <van-icon name="good-job-o" /> {{ fmt(it.likes) }}
-          &nbsp;<van-icon name="down" /> {{ fmt(it.downloads) }}
+    <div class="pb-grid">
+      <div v-for="it in items" :key="it.id" class="pb-card pb-row clickable"
+           @click="router.push(`/model/makerworld/${it.id}`)">
+        <img class="pb-thumb" :src="it.cover" loading="lazy" />
+        <div class="pb-grow">
+          <div style="font-weight:600" class="pb-ellipsis">{{ it.title }}</div>
+          <div class="pb-muted pb-ellipsis" style="margin-top:4px">@{{ it.author || '匿名' }}</div>
+          <div class="pb-muted" style="margin-top:6px">
+            <van-icon name="good-job-o" /> {{ fmt(it.likes) }}
+            &nbsp;<van-icon name="down" /> {{ fmt(it.downloads) }}
+          </div>
         </div>
+        <van-icon name="arrow" color="#c8c9cc" />
       </div>
-      <van-icon name="arrow" color="#c8c9cc" />
     </div>
 
     <van-loading v-if="loading" center style="margin:20px">加载中...</van-loading>
     <div v-if="items.length && items.length < total" style="text-align:center;margin:8px">
-      <van-button plain size="small" @click="loadMore">加载更多</van-button>
+      <van-button plain size="small" round @click="loadMore">加载更多</van-button>
     </div>
     <van-notice-bar v-if="error" wrapable :scrollable="false" color="#ee0a24" background="#fff1f1">
       {{ error }}

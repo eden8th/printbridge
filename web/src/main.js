@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import Vant from 'vant'
+import '@vant/touch-emulator'
 import 'vant/lib/index.css'
 import App from './App.vue'
 import router from './router'

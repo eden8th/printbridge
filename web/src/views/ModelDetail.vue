@@ -247,18 +247,18 @@ async function importOnly() {
 <template>
   <div class="pb-page" v-if="design">
     <van-nav-bar :title="design.title" left-arrow @click-left="router.back()" />
-    <div class="pb-card">
-      <img v-if="design.cover" :src="design.cover"
-           style="width:100%;border-radius:8px;max-height:320px;object-fit:cover" />
-      <h2 class="pb-title" style="margin-top:10px">{{ design.title }}</h2>
-      <div class="pb-muted">@{{ design.author || '匿名' }} ·
-        <a :href="design.source_url" target="_blank" rel="noopener">来源页</a></div>
-      <div style="margin-top:10px" class="pb-muted summary"
-           v-html="design.summary_html"></div>
-    </div>
+    <div class="pb-cols">
+      <div class="pb-card">
+        <img v-if="design.cover" :src="design.cover"
+             style="width:100%;border-radius:8px;max-height:320px;object-fit:cover" />
+        <h2 class="pb-title" style="margin-top:10px">{{ design.title }}</h2>
+        <div class="pb-muted">@{{ design.author || '匿名' }} ·
+          <a :href="design.source_url" target="_blank" rel="noopener">来源页</a></div>
+        <div style="margin-top:10px" class="pb-muted summary"
+             v-html="design.summary_html"></div>
+      </div>
 
-    <div class="pb-card">
-      <h3 class="pb-title">选择要打印的版本</h3>
+      <div>
       <van-radio-group v-model="selected">
         <van-cell v-for="inst in design.instances" :key="inst.instance_id" clickable>
           <template #title>
@@ -272,6 +272,7 @@ async function importOnly() {
       </van-radio-group>
       <van-empty v-if="!design.instances.length" description="该设计没有可下载文件" />
     </div>
+    </div><!-- /pb-cols -->
 
     <van-button type="primary" block round size="large" :disabled="!selected"
                 @click="showPrint = true">

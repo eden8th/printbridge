@@ -156,16 +156,17 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
   <div class="pb-page" v-if="job">
     <van-nav-bar :title="`任务 #${job.id}`" left-arrow @click-left="router.back()" />
 
-    <!-- 状态与阶段 -->
-    <div class="pb-card">
-      <div class="pb-row">
-        <span style="font-weight:600">{{ job.kind === 'slice' ? '切片任务' : '一键打印' }}</span>
-        <span class="pb-grow"></span>
-        <span class="pb-muted">{{ job.detail || job.state }}</span>
-      </div>
-      <img v-if="job.result?.thumbnail_path" class="pb-thumbimg"
-           :src="`/api/jobs/${job.id}/thumbnail`" alt="打印预览" />
-      <div class="pb-steps">
+    <div class="pb-cols">
+      <!-- 状态与阶段 -->
+      <div class="pb-card">
+        <div class="pb-row">
+          <span style="font-weight:600">{{ job.kind === 'slice' ? '切片任务' : '一键打印' }}</span>
+          <span class="pb-grow"></span>
+          <span class="pb-muted">{{ job.detail || job.state }}</span>
+        </div>
+        <img v-if="job.result?.thumbnail_path" class="pb-thumbimg"
+             :src="`/api/jobs/${job.id}/thumbnail`" alt="打印预览" />
+        <div class="pb-steps">
         <div v-for="(s, i) in steps" :key="s.key" class="pb-row" style="padding:6px 0">
           <van-icon :name="stepIcon(i)" :color="stepColor(i)" size="18" />
           <span class="pb-grow" :style="{ color: stepColor(i) }">{{ s.label }}</span>
@@ -256,6 +257,7 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
         创建于 {{ new Date(job.created_at).toLocaleString('zh-CN') }}
       </div>
     </div>
+    </div><!-- /pb-cols -->
 
     <!-- 切片日志 -->
     <div class="pb-card" v-if="log">

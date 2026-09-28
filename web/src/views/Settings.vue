@@ -2,6 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { showSuccessToast } from 'vant'
 import { api } from '../api'
+import { useIsMobile } from '../composables/useDevice'
+
+const isMobile = useIsMobile()
 
 const makerworldToken = ref('')
 const hasToken = ref(false)
@@ -99,7 +102,7 @@ async function saveSlicer() {
     <div class="pb-card">
       <h3 class="pb-title">MakerWorld(拓竹)凭证</h3>
       <div class="pb-muted" style="margin-bottom:8px">
-        下载模型需要拓竹账号凭证。三种方式任选其一(推荐方式一)。
+        {{ isMobile ? '使用拓竹账号密码登录,凭证只保存在你自己的设备上' : '下载模型需要拓竹账号凭证。三种方式任选其一(推荐方式一)。' }}
       </div>
 
       <!-- 方式一:账号密码登录 -->
@@ -118,8 +121,8 @@ async function saveSlicer() {
         </div>
       </div>
 
-      <!-- 方式二:书签脚本 -->
-      <div class="pb-method">
+      <!-- 方式二:书签脚本(PC 浏览器专属;H5 仅支持账号密码) -->
+      <div class="pb-method" v-if="!isMobile">
         <div class="pb-method-tag">方式二</div>
         <b>一键提取书签</b>(账号触发验证码时用)
         <div class="pb-muted" style="margin:4px 0;line-height:1.6">
@@ -134,8 +137,8 @@ async function saveSlicer() {
                    :placeholder="hasToken ? '已配置(输入新值可更换)' : '粘贴复制的 token'" />
       </div>
 
-      <!-- 方式三:F12 -->
-      <van-collapse v-model="openFaq">
+      <!-- 方式三:F12(PC 专属备用;H5 仅支持账号密码) -->
+      <van-collapse v-model="openFaq" v-if="!isMobile">
         <van-collapse-item title="方式三 · F12 手动获取(备用)" name="f12">
           <div class="pb-muted" style="line-height:1.7">
             ① 电脑浏览器打开 makerworld.com 并登录<br />

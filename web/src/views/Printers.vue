@@ -150,42 +150,44 @@ onUnmounted(() => store.off(onTel))
 
     <van-empty v-if="!printers.length" description="还没有打印机,点右上角添加" />
 
-    <div v-for="p in printers" :key="p.id" class="pb-card">
-      <div class="pb-row">
-        <div class="pb-grow">
-          <div style="font-weight:600">
-            {{ p.name }}
-            <span class="pb-muted" style="font-weight:400">{{ p.adapter }} · {{ p.host }}</span>
+    <div class="pb-grid">
+      <div v-for="p in printers" :key="p.id" class="pb-card">
+        <div class="pb-row">
+          <div class="pb-grow">
+            <div style="font-weight:600">
+              {{ p.name }}
+              <span class="pb-muted" style="font-weight:400">{{ p.adapter }} · {{ p.host }}</span>
+            </div>
           </div>
+          <van-tag v-if="telOf(p)?.cfs_connected" color="#ff976a">CFS</van-tag>
+          <van-tag :color="stateColor[telOf(p)?.state] || '#969799'">
+            {{ telOf(p)?.state || '未连接' }}
+          </van-tag>
         </div>
-        <van-tag :color="stateColor[telOf(p)?.state] || '#969799'">
-          {{ telOf(p)?.state || '未连接' }}
-        </van-tag>
-        <van-tag v-if="telOf(p)?.cfs_connected" color="#ff976a">CFS</van-tag>
-      </div>
 
-      <div v-if="telOf(p)" class="pb-row" style="margin-top:8px;gap:16px;flex-wrap:wrap">
-        <span class="pb-muted">喷嘴 {{ telOf(p).nozzle_temp ?? '-' }} /
-          {{ telOf(p).nozzle_target ?? '-' }}℃</span>
-        <span class="pb-muted">热床 {{ telOf(p).bed_temp ?? '-' }} /
-          {{ telOf(p).bed_target ?? '-' }}℃</span>
-        <span v-if="telOf(p).progress != null" class="pb-muted">
-          {{ Math.round(telOf(p).progress * 100) }}%</span>
-        <span v-if="telOf(p).filename" class="pb-muted pb-ellipsis">
-          {{ telOf(p).filename }}</span>
-      </div>
+        <div v-if="telOf(p)" class="pb-row" style="margin-top:8px;gap:16px;flex-wrap:wrap">
+          <span class="pb-muted">喷嘴 {{ telOf(p).nozzle_temp ?? '-' }} /
+            {{ telOf(p).nozzle_target ?? '-' }}℃</span>
+          <span class="pb-muted">热床 {{ telOf(p).bed_temp ?? '-' }} /
+            {{ telOf(p).bed_target ?? '-' }}℃</span>
+          <span v-if="telOf(p).progress != null" class="pb-muted">
+            {{ Math.round(telOf(p).progress * 100) }}%</span>
+          <span v-if="telOf(p).filename" class="pb-muted pb-ellipsis">
+            {{ telOf(p).filename }}</span>
+        </div>
 
-      <van-progress v-if="telOf(p)?.progress != null" :percentage="Math.round(telOf(p).progress * 100)"
-                    style="margin-top:6px" />
+        <van-progress v-if="telOf(p)?.progress != null" :percentage="Math.round(telOf(p).progress * 100)"
+                      style="margin-top:6px" />
 
-      <div class="pb-row" style="margin-top:10px">
-        <van-button size="small" plain type="primary" :loading="testing" @click="test(p)">测试</van-button>
-        <van-button size="small" plain @click="openEdit(p)">编辑</van-button>
-        <van-button size="small" plain @click="control(p, 'pause')">暂停</van-button>
-        <van-button size="small" plain @click="control(p, 'resume')">恢复</van-button>
-        <van-button size="small" plain type="danger" @click="control(p, 'stop')">停止</van-button>
-        <span class="pb-grow"></span>
-        <van-icon name="delete-o" color="#969799" @click="remove(p)" />
+        <div class="pb-row" style="margin-top:10px">
+          <van-button size="small" plain type="primary" :loading="testing" @click="test(p)">测试</van-button>
+          <van-button size="small" plain @click="openEdit(p)">编辑</van-button>
+          <van-button size="small" plain @click="control(p, 'pause')">暂停</van-button>
+          <van-button size="small" plain @click="control(p, 'resume')">恢复</van-button>
+          <van-button size="small" plain type="danger" @click="control(p, 'stop')">停止</van-button>
+          <span class="pb-grow"></span>
+          <van-icon name="delete-o" color="#969799" @click="remove(p)" />
+        </div>
       </div>
     </div>
 
