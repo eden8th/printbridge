@@ -4,8 +4,10 @@ import { useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { api, uploadFile } from '../api'
 import { store } from '../store'
+import { useIsMobile } from '../composables/useDevice'
 
 const router = useRouter()
+const isMobile = useIsMobile()
 
 const models = ref([])
 const batchMode = ref(false)
@@ -109,11 +111,11 @@ onUnmounted(() => store.off(onLib))
     <van-nav-bar title="我的模型库">
       <template #right>
         <span class="pb-navbar-action" role="button" @click="showLinkImport = true">
-          链接导入
+          {{ isMobile ? '导入' : '链接导入' }}
         </span>
         <span class="pb-navbar-action" role="button"
               @click="models.length && toggleBatch()">
-          {{ batchMode ? '退出管理' : '批量管理' }}
+          {{ batchMode ? '退出' : (isMobile ? '管理' : '批量管理') }}
         </span>
         <label class="pb-navbar-action" role="button" style="margin-left:10px">
           <input type="file" accept=".3mf,.stl,.gcode" style="display:none" @change="onUpload" />
