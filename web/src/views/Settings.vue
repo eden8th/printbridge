@@ -113,9 +113,10 @@ async function saveSlicer() {
                    clearable />
         <div style="margin:8px 16px" class="pb-row">
           <van-button type="primary" size="small" :loading="loggingIn" @click="mwLogin">
-            登录并保存
+            {{ isMobile ? '登录' : '登录并保存' }}
           </van-button>
-          <van-button size="small" plain :loading="verifying" @click="verifyToken">验证</van-button>
+          <!-- 「验证」只服务于手动粘贴的 token,H5 无此输入框 -->
+          <van-button v-if="!isMobile" size="small" plain :loading="verifying" @click="verifyToken">验证</van-button>
           <span v-if="loginResult" class="pb-muted">{{ loginResult }}</span>
         </div>
       </div>
@@ -155,7 +156,8 @@ async function saveSlicer() {
           </van-radio-group>
         </template>
       </van-field>
-      <div style="margin:8px 16px">
+      <!-- 「保存手填内容」仅用于手动粘贴 token 的路径;H5 账号登录自动保存 -->
+      <div style="margin:8px 16px" v-if="!isMobile">
         <van-button type="primary" size="small" @click="saveMakerworld">保存手填内容</van-button>
         <span class="pb-muted" style="margin-left:8px">凭证仅保存在本设备</span>
       </div>
