@@ -290,3 +290,50 @@ async def verify_makerworld(body: VerifyTokenBody):
     if r.status_code in (401, 403):
         return {"valid": False, "detail": "token 无效或已过期,请重新复制"}
     return {"valid": None, "detail": f"无法确认(HTTP {r.status_code}),仍可保存后试下载"}
+
+
+class MakerWorldLoginBody(BaseModel):
+    account: str
+    password: str
+    region: str = "cn"
+
+
+@router.post("/settings/makerworld-login")
+async def makerworld_login(body: MakerWorldLoginBody,
+                           db: AsyncSession = Depends(get_db),
+                           user: User = Depends(current_user)):
+    """拓竹账号密码登录:调官方登录接口换 token 并自动保存。
+
+    密码只在本请求内使用,不落盘;成功后仅保存 token。
+    部分账号会触发邮箱验证码(MFA),此时提示用户改用书签/手动方式。
+    """
+    import httpx
+    account = (body.account or "").strip()
+    password = body.password or ""
+    if not account or not password:
+        return {"ok": False, "detail": "请填写账号和密码"}
+    host = "api.bambulab.cn" if body.region == "cn" else "api.bambulab.com"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(f"https://{host}/v1/user-service/user/login",
+                                  json={"account": account, "password": password},
+                                  headers={"User-Agent": "Mozilla/5.0"})
+    except httpx.HTTPError as exc:
+        return {"ok": None, "detail": f"网络错误:{exc}"}
+    try:
+        data = r.json()
+    except ValueError:
+        return {"ok": None, "detail": f"登录接口返回异常(HTTP {r.status_code})"}
+    token = str(data.get("token") or data.get("accessToken") or "")
+    if token:
+        cur = await get_setting(db, "makerworld")
+        await put_setting(db, "makerworld",
+                          {**cur, "token": token, "region": body.region})
+        return {"ok": True, "detail": "登录成功,凭证已自动保存"}
+    err = str(data.get("error") or data.get("message") or "")
+    if r.status_code in (401, 400) and "password" in err.lower() or "incorrect" in err.lower():
+        return {"ok": False, "detail": "账号或密码错误"}
+    if "verif" in err.lower() or "code" in err.lower():
+        return {"ok": False, "detail":
+                "该账号触发了邮箱验证码校验,请改用下方的书签提取或手动粘贴 token"}
+    return {"ok": False, "detail": err or f"登录失败(HTTP {r.status_code})"}

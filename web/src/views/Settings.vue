@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { showSuccessToast } from 'vant'
 import { api } from '../api'
 
@@ -11,6 +11,42 @@ const slicerProbe = ref(null)
 const settingsPath = ref(false)
 const verifying = ref(false)
 const verifyResult = ref('')
+const mwAccount = ref('')
+const mwPassword = ref('')
+const loggingIn = ref(false)
+const loginResult = ref('')
+const openFaq = ref([])
+
+// 方式二:书签脚本(在 makerworld.com 页面上读取 token 复制到剪贴板)
+const bookmarklet = computed(() => {
+  const code = `javascript:(()=>{try{const m=document.cookie.match(/(?:^|;\\s*)token=([^;]+)/);if(!m){alert('未找到 token,请确认已登录 makerworld.com');return}const t=decodeURIComponent(m[1]);(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>alert('token 已复制:'+t.slice(0,12)+'...,请回到 PrintBridge 粘贴')).catch(()=>{prompt('请手动复制 token:',t)})}catch(e){alert('读取失败:'+e.message)}})()`
+  return code
+})
+
+async function mwLogin() {
+  if (!mwAccount.value.trim() || !mwPassword.value) {
+    loginResult.value = '请填写账号和密码'
+    return
+  }
+  loggingIn.value = true
+  try {
+    const r = await api.post('/api/settings/makerworld-login', {
+      account: mwAccount.value.trim(),
+      password: mwPassword.value,
+      region: region.value,
+    })
+    loginResult.value = (r.ok === true ? '✅ ' : r.ok === false ? '❌ ' : '⚠️ ') + r.detail
+    if (r.ok === true) {
+      hasToken.value = true
+      mwPassword.value = ''
+      showSuccessToast('拓竹凭证已自动保存')
+    }
+  } catch (e) {
+    loginResult.value = e.message
+  } finally {
+    loggingIn.value = false
+  }
+}
 
 async function verifyToken() {
   const token = makerworldToken.value.trim()
@@ -62,16 +98,54 @@ async function saveSlicer() {
 
     <div class="pb-card">
       <h3 class="pb-title">MakerWorld(拓竹)凭证</h3>
-      <div class="pb-muted" style="margin-bottom:8px;line-height:1.7">
-        <b>获取步骤(电脑浏览器):</b><br />
-        ① 打开 makerworld.com 并登录你的账号<br />
-        ② 按 <b>F12</b> 打开开发者工具,切到「应用程序 / Application」标签<br />
-        ③ 左侧展开「Cookie」→ 点选 https://makerworld.com<br />
-        ④ 在列表里找到名为 <b>token</b> 的行,复制它的值粘贴到下面<br />
-        下载模型必须配这个凭证;它只保存在你自己的设备上,平台不托管账号。
+      <div class="pb-muted" style="margin-bottom:8px">
+        下载模型需要拓竹账号凭证。三种方式任选其一(推荐方式一)。
       </div>
-      <van-field v-model="makerworldToken" label="token"
-                 :placeholder="hasToken ? '已配置(输入新值可更换)' : '粘贴 Cookie 中的 token'" />
+
+      <!-- 方式一:账号密码登录 -->
+      <div class="pb-method">
+        <div class="pb-method-tag">方式一 · 推荐</div>
+        <b>账号密码登录</b>(全自动,密码不保存)
+        <van-field v-model="mwAccount" label="账号" placeholder="手机号 / 邮箱" clearable />
+        <van-field v-model="mwPassword" label="密码" type="password" placeholder="拓竹账号密码"
+                   clearable />
+        <div style="margin:8px 16px" class="pb-row">
+          <van-button type="primary" size="small" :loading="loggingIn" @click="mwLogin">
+            登录并保存
+          </van-button>
+          <van-button size="small" plain :loading="verifying" @click="verifyToken">验证</van-button>
+          <span v-if="loginResult" class="pb-muted">{{ loginResult }}</span>
+        </div>
+      </div>
+
+      <!-- 方式二:书签脚本 -->
+      <div class="pb-method">
+        <div class="pb-method-tag">方式二</div>
+        <b>一键提取书签</b>(账号触发验证码时用)
+        <div class="pb-muted" style="margin:4px 0;line-height:1.6">
+          ① 把下面的橙色按钮<b>拖到浏览器书签栏</b> →
+          ② 打开并登录 <a href="https://makerworld.com" target="_blank" rel="noopener">makerworld.com</a> →
+          ③ 点书签栏里的按钮 → token 自动复制 → 回这里粘贴保存
+        </div>
+        <a class="pb-bookmarklet" :href="bookmarklet"
+           onclick="return false"
+           title="拖我到书签栏">🔑 复制拓竹 Token</a>
+        <van-field v-model="makerworldToken" label="token"
+                   :placeholder="hasToken ? '已配置(输入新值可更换)' : '粘贴复制的 token'" />
+      </div>
+
+      <!-- 方式三:F12 -->
+      <van-collapse v-model="openFaq">
+        <van-collapse-item title="方式三 · F12 手动获取(备用)" name="f12">
+          <div class="pb-muted" style="line-height:1.7">
+            ① 电脑浏览器打开 makerworld.com 并登录<br />
+            ② 按 <b>F12</b> 打开开发者工具,切到「应用程序 / Application」标签<br />
+            ③ 左侧展开「Cookie」→ 点选 https://makerworld.com<br />
+            ④ 找到名为 <b>token</b> 的行,复制它的值粘贴到上面
+          </div>
+        </van-collapse-item>
+      </van-collapse>
+
       <van-field label="站点" readonly>
         <template #input>
           <van-radio-group v-model="region" direction="horizontal">
@@ -80,10 +154,9 @@ async function saveSlicer() {
           </van-radio-group>
         </template>
       </van-field>
-      <div style="margin:8px 16px" class="pb-row">
-        <van-button type="primary" size="small" @click="saveMakerworld">保存</van-button>
-        <van-button size="small" plain :loading="verifying" @click="verifyToken">验证</van-button>
-        <span v-if="verifyResult" class="pb-muted">{{ verifyResult }}</span>
+      <div style="margin:8px 16px">
+        <van-button type="primary" size="small" @click="saveMakerworld">保存手填内容</van-button>
+        <span class="pb-muted" style="margin-left:8px">凭证只保存在你自己的设备上,平台不托管账号</span>
       </div>
     </div>
 
@@ -111,3 +184,20 @@ async function saveSlicer() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.pb-method {
+  border: 1px solid #ebedf0; border-radius: 8px; padding: 10px 12px;
+  margin-bottom: 10px; font-size: 13px; position: relative;
+}
+.pb-method-tag {
+  position: absolute; top: -9px; left: 10px; background: #1989fa; color: #fff;
+  font-size: 11px; padding: 1px 8px; border-radius: 8px;
+}
+.pb-bookmarklet {
+  display: inline-block; background: linear-gradient(135deg, #ff9800, #ff5722);
+  color: #fff; font-size: 13px; padding: 6px 14px; border-radius: 6px;
+  text-decoration: none; margin: 6px 0; cursor: grab; border: 1px dashed #fff3e0;
+  box-shadow: 0 1px 4px rgba(0,0,0,.2);
+}
+</style>
