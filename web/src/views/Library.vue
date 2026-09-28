@@ -1,12 +1,31 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { api, uploadFile } from '../api'
 import { store } from '../store'
 
+const router = useRouter()
+
 const models = ref([])
 const batchMode = ref(false)
 const selected = ref(new Set())
+const showLinkImport = ref(false)
+const shareUrl = ref('')
+
+async function importFromLink() {
+  const url = shareUrl.value.trim()
+  if (!url) return
+  try {
+    const r = await api.post('/api/sources/parse-link', { url })
+    showLinkImport.value = false
+    shareUrl.value = ''
+    // 跳转模型详情页(可选版本后一键打印/入库)
+    router.push(`/model/${r.source}/${r.design_id}`)
+  } catch (e) {
+    showFailToast(e.message)
+  }
+}
 
 async function load() {
   try {
@@ -89,6 +108,9 @@ onUnmounted(() => store.off(onLib))
   <div class="pb-page">
     <van-nav-bar title="我的模型库">
       <template #right>
+        <span class="pb-navbar-action" role="button" @click="showLinkImport = true">
+          链接导入
+        </span>
         <span class="pb-navbar-action" role="button"
               @click="models.length && toggleBatch()">
           {{ batchMode ? '退出管理' : '批量管理' }}
@@ -138,5 +160,15 @@ onUnmounted(() => store.off(onLib))
         删除所选({{ selected.size }})
       </van-button>
     </div>
+
+    <!-- 分享链接导入 -->
+    <van-dialog v-model:show="showLinkImport" title="分享链接导入" show-cancel-button
+                @confirm="importFromLink">
+      <van-field v-model="shareUrl" label="链接" type="textarea" rows="2" autosize
+                 placeholder="粘贴拓竹分享链接,如 https://makerworld.com/zh/models/123456" />
+      <div class="pb-muted" style="padding:4px 16px 10px">
+        支持拓竹 MakerWorld 分享链接(含手机端分享的短链);创想云链接导入即将支持。
+      </div>
+    </van-dialog>
   </div>
 </template>

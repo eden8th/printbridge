@@ -27,6 +27,30 @@ async def list_sources():
             [("makerworld", "MakerWorld(拓竹)")]]
 
 
+class ParseLinkBody(BaseModel):
+    url: str
+
+
+@router.post("/sources/parse-link")
+async def parse_link(body: ParseLinkBody,
+                     db: AsyncSession = Depends(get_db),
+                     user: User = Depends(current_user)):
+    """解析分享链接(拓竹/创想),返回 source+design_id 供前端跳转详情。"""
+    from app.sources import parse_share_link
+    result = parse_share_link(body.url)
+    if result.get("unsupported"):
+        raise HTTPException(400, result["reason"])
+    # 校验设计存在并带回标题(顺便确认 token/网络可用性)
+    adapter = await build_adapter(result["source"], db)
+    try:
+        d = await adapter.design(result["design_id"])
+        result["title"] = d.title
+        result["cover"] = d.cover
+    finally:
+        await adapter.aclose()
+    return result
+
+
 @router.get("/sources/{key}/search")
 async def search_models(key: str, keyword: str, page: int = 1,
                         page_size: int = 20, sort: str = "score",
