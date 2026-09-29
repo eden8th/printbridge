@@ -69,7 +69,10 @@ def _run_sync(req: SliceRequest, exe: str) -> tuple[int, list[str]]:
     """同步运行切片子进程(Windows 上 asyncio 管道对 GUI 子系统程序不可靠)。"""
     out_dir = Path(req.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    argv = [exe]
+    argv = [exe, "--allow-newer-file"]
+    # allow-newer-file:MakerWorld 现下发新版 Bambu Studio 产出的工程 3MF
+    # (版本号如 2.5.x > Orca 自身 2.4.x),默认按 CLI_FILE_VERSION_NOT_SUPPORTED(-24)
+    # 拒载;内嵌配置本就会被我们的 --load-settings 覆盖,跳过版本门槛是安全的。
     for m in req.machine_files:
         argv += ["--load-settings", m]
     argv += ["--load-settings", req.process_file]
@@ -106,6 +109,44 @@ def _run_sync(req: SliceRequest, exe: str) -> tuple[int, list[str]]:
     return code, tail
 
 
+def _inject_thumbnails(gcode_path: str, png_path: str,
+                       sizes: tuple[tuple[int, int], ...] = ((96, 96), (300, 300))) -> None:
+    """把板预览 PNG 以 Creality 规格的 base64 注释块注入 G-code 头部。
+
+    K2 系列屏幕从 G-code 注释读取缩略图(`; thumbnail begin WxH <len>`),
+    而 Orca 2.4.2 CLI 切片不输出该块(GUI 才有),故自行注入;
+    规格与 Creality Print 产物一致(96x96 + 300x300 PNG,每行 78 字符 base64)。
+    """
+    import base64
+    import io
+
+    try:
+        from PIL import Image
+        img = Image.open(png_path).convert("RGB")
+    except Exception:  # noqa: BLE001  无 pillow/图片损坏时跳过,不影响切片产物
+        return
+    blocks = []
+    for w, h in sizes:
+        buf = io.BytesIO()
+        img.resize((w, h)).save(buf, "PNG", optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        lines = [f"; thumbnail begin {w}x{h} {len(b64)}"]
+        lines += ["; " + b64[i:i + 78] for i in range(0, len(b64), 78)]
+        lines.append("; thumbnail end")
+        blocks.append("\n".join(lines))
+    payload = "; THUMBNAIL_BLOCK_START\n" + "\n;\n".join(blocks) + "\n; THUMBNAIL_BLOCK_END\n"
+
+    with open(gcode_path, "r", encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    marker = "; HEADER_BLOCK_END"
+    idx = text.find(marker)
+    if idx < 0:
+        return
+    pos = text.find("\n", idx) + 1
+    with open(gcode_path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text[:pos] + payload + text[pos:])
+
+
 def _extract_gcode(gcode_3mf: Path, out_dir: Path) -> tuple[str, str]:
     """从 .gcode.3mf 容器解出最大的 plate_N.gcode 与板预览图。"""
     with zipfile.ZipFile(gcode_3mf) as z:
@@ -128,10 +169,11 @@ def _extract_gcode(gcode_3mf: Path, out_dir: Path) -> tuple[str, str]:
                     and i.filename.endswith(".png")]
         if pngs:
             png = max(pngs, key=lambda i: i.file_size)
-            thumb_target = out_dir / "plate_thumb.png"
-            with z.open(png) as src, open(thumb_target, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            thumb = str(thumb_target)
+        thumb_target = out_dir / "plate_thumb.png"
+        with z.open(png) as src, open(thumb_target, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        thumb = str(thumb_target)
+        _inject_thumbnails(str(target), thumb)
         return str(target), thumb
 
 
@@ -180,19 +222,28 @@ _G_RE = re.compile(r";\s*filament used \[g\]\s*=\s*([\d.,\s]+)", re.I)
 
 
 def parse_gcode_stats(gcode_path: str) -> tuple[float, float]:
-    """从 Orca 系 G-code 头注释提取预估时长与耗材克重。解析不出返回 (0,0)。"""
+    """从 Orca 系 G-code 提取预估时长与耗材克重。解析不出返回 (0,0)。
+
+    Orca v2.4.x 把统计块写在文件尾部(estimated printing time / filament used),
+    旧版在头部,故头尾都扫。"""
     try:
+        import os
         with open(gcode_path, "r", encoding="utf-8", errors="replace") as fh:
             head = "".join(fh.readline() for _ in range(400))
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 65536))
+            tail = fh.read()
     except OSError:
         return 0.0, 0.0
+    text = head + "\n" + tail
     seconds = 0.0
-    m = _TIME_RE.search(head)
+    m = _TIME_RE.search(text)
     if m:
         h, mi, s = (int(x or 0) for x in m.groups())
         seconds = h * 3600 + mi * 60 + s
     grams = 0.0
-    m = _G_RE.search(head)
+    m = _G_RE.search(text)
     if m:
         # 多耗材逗号列表:取各通道之和(未用通道为 0)
         grams = sum(float(x) for x in m.group(1).split(",") if x.strip())
