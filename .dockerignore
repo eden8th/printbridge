@@ -1,0 +1,15 @@
+# 构建上下文只保留镜像需要的内容(构建上下文为仓库根目录)
+.git
+data
+docs
+tools
+web/node_modules
+web/public
+web/src
+web/*.js
+web/*.html
+web/README.md
+server/data
+server/tests
+server/00000.log
+vendor/*.log

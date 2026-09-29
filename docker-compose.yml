@@ -1,16 +1,21 @@
 # PrintBridge 自托管部署(NAS / 常开主机)
-# 用法:docker compose up -d  →  浏览器打开 http://<主机IP>:8000
+# 用法:docker compose up -d --build  →  浏览器打开 http://<主机IP>:8002
+# 端口 8000 已被服务器上其他服务占用,宿主机侧映射到 8002
 services:
   server:
-    build: ./server
+    build:
+      context: .
+      dockerfile: server/Dockerfile
     container_name: printbridge
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8002:8000"
     environment:
       # 生产用 PostgreSQL;数据卷见 volumes 段
       PB_DATABASE_URL: postgresql+asyncpg://printbridge:printbridge@db:5432/printbridge
       PB_ROLE: server
+      # 容器内看不到宿主机真实网段,局域网扫描需显式指定
+      PB_SCAN_CIDRS: 192.168.8.0/24
     volumes:
       - printbridge-data:/app/data
     depends_on:
@@ -33,15 +38,14 @@ services:
       timeout: 3s
       retries: 10
 
-  # P1 预留:worker 模式启用;P0 队列在进程内,暂不依赖 redis
-  redis:
-    image: redis:7-alpine
-    container_name: printbridge-redis
-    restart: unless-stopped
-    volumes:
-      - printbridge-redis:/data
+  # P1 预留:worker 模式启用;P0 队列在进程内,不依赖 redis,暂不部署
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: printbridge-redis
+  #   restart: unless-stopped
+  #   volumes:
+  #     - printbridge-redis:/data
 
 volumes:
   printbridge-data:
   printbridge-db:
-  printbridge-redis:
