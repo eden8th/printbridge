@@ -80,6 +80,16 @@ async function cancelJob(j) {
   }
 }
 
+async function retryJob(j) {
+  try {
+    await api.post(`/api/jobs/${j.id}/retry`)
+    showSuccessToast(`任务 #${j.id} 已重新入队`)
+    load()
+  } catch (e) {
+    showFailToast(e.message)
+  }
+}
+
 function delJob(j) {
   showConfirmDialog({ title: '删除任务', message: `确定删除任务 #${j.id}?记录与日志将一并删除。` })
     .then(async () => {
@@ -135,14 +145,19 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
                         size="mini" plain type="warning" @click.stop="cancelJob(j)">
               取消
             </van-button>
-            <van-button v-else size="mini" plain type="danger" @click.stop="delJob(j)">
-              删除
-            </van-button>
+            <template v-else>
+              <van-button v-if="j.state !== 'done'" size="mini" plain type="primary"
+                          @click.stop="retryJob(j)">重试</van-button>
+              <van-button size="mini" plain type="danger" @click.stop="delJob(j)">
+                删除
+              </van-button>
+            </template>
           </template>
         </div>
         <div class="pb-muted" style="margin-top:6px">
           {{ j.detail || j.error || '等待中' }}
           <span v-if="progressText(j)"> · {{ progressText(j) }}</span>
+          <span v-if="j.retries"> · 已重试 {{ j.retries }} 次</span>
         </div>
         <van-progress v-if="j.progress > 0 && j.state !== 'done'"
                       :percentage="Math.round(j.progress * 100)" style="margin-top:8px" />

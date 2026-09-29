@@ -85,6 +85,7 @@ async def list_jobs(limit: int = 50, db: AsyncSession = Depends(get_db),
         .order_by(Job.id.desc()).limit(min(limit, 200)))
     return [{"id": j.id, "kind": j.kind, "state": j.state, "detail": j.detail,
              "progress": j.progress, "error": j.error,
+             "retries": int((j.payload or {}).get("retries") or 0),
              "model_file_id": j.model_file_id, "printer_id": j.printer_id,
              "payload": j.payload, "result": j.result,
              "created_at": j.created_at.isoformat()} for j in res.scalars()]
@@ -107,6 +108,7 @@ async def job_detail(job_id: int, db: AsyncSession = Depends(get_db),
     return {
         "id": j.id, "kind": j.kind, "state": j.state, "detail": j.detail,
         "progress": j.progress, "error": j.error, "payload": j.payload,
+        "retries": int((j.payload or {}).get("retries") or 0),
         "result": j.result, "model_file_id": j.model_file_id,
         "model_file_name": model_file_name, "printer_id": j.printer_id,
         "printer_name": printer_name, "has_log": bool(j.log_path),
@@ -225,6 +227,64 @@ async def cancel_job(job_id: int, db: AsyncSession = Depends(get_db),
         return {"ok": True, "state": j.state}
     await jsvc.set_state(db, j, "cancelled", error="用户取消")
     return {"ok": True}
+
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_job(job_id: int, db: AsyncSession = Depends(get_db),
+                    user: User = Depends(current_user)):
+    """重试失败/已取消的任务:复位状态重新入队。
+
+    payload 快照里带着全部入参,下载阶段已成功过的任务带 model_file_id,
+    重试会跳过下载直接切片,不会重复拉取模型。
+    """
+    j = await db.get(Job, job_id)
+    if j is None or j.user_id != user.id:
+        raise HTTPException(404, "任务不存在")
+    if j.state not in ("failed", "cancelled"):
+        raise HTTPException(400, "只有失败或已取消的任务可以重试")
+    payload = dict(j.payload or {})
+    retries = int(payload.get("retries") or 0) + 1
+    payload["retries"] = retries
+    j.payload = payload
+    await jsvc.set_state(db, j, "queued", detail="重试:已重新入队",
+                         progress=0.0, error="")
+    queue.enqueue(j.id)
+    return {"ok": True, "retries": retries}
+
+
+@router.post("/jobs/{job_id}/reprint")
+async def reprint_job(job_id: int, db: AsyncSession = Depends(get_db),
+                      user: User = Depends(current_user)):
+    """重新打印:用已完成任务的入参快照创建一个新任务并入队。
+
+    与 retry 的区别:retry 复位原任务重跑(仅限 failed/cancelled);
+    reprint 面向 done 任务,生成一条全新任务记录,原任务历史保留。
+    """
+    j = await db.get(Job, job_id)
+    if j is None or j.user_id != user.id:
+        raise HTTPException(404, "任务不存在")
+    p = dict(j.payload or {})
+    if j.kind != "pipeline" or p.get("slice_only") or p.get("download_only"):
+        raise HTTPException(400, "只有一键打印任务支持重新打印")
+    model_file_id = p.get("model_file_id")
+    if not model_file_id and not (p.get("source") and p.get("design_id")):
+        raise HTTPException(400, "任务入参缺少模型信息,无法重新打印")
+    if not p.get("printer_id"):
+        raise HTTPException(400, "任务入参缺少打印机,无法重新打印")
+    body = {k: p[k] for k in (
+        "source", "design_id", "instance_id", "bundle", "machine_id",
+        "filament_ids", "filament_colors", "process_id", "plate", "cfs_tnn")
+        if p.get(k) not in (None, "", [])}
+    if model_file_id:
+        body["model_file_id"] = int(model_file_id)
+    body["printer_id"] = int(p["printer_id"])
+    body["auto_start"] = bool(p.get("auto_start", True))
+    job = await jsvc.create_job(
+        db, user.id, kind="pipeline", printer_id=body["printer_id"],
+        model_file_id=body.get("model_file_id"),
+        payload=body)
+    queue.enqueue(job.id)
+    return {"job_id": job.id}
 
 
 # ---- 切片参数包 --------------------------------------------------------

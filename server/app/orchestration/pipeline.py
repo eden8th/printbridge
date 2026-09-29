@@ -34,6 +34,29 @@ async def _check_cancelled(db: AsyncSession, job) -> bool:
     return job.state == "cancelled"
 
 
+async def _wait_nozzle_cool(db: AsyncSession, job, adapter, jsvc,
+                            limit: float, timeout: float = 420.0) -> bool:
+    """轮询喷嘴温度直到降到 limit 以下(供 START_PRINT 两级升温用)。
+
+    读不到温度(打印机离线等)时立即返回 True,不阻塞打印;用户取消则提前结束。
+    """
+    import asyncio as _asyncio
+    waited = 0.0
+    while waited < timeout:
+        if await _check_cancelled(db, job):
+            return False
+        try:
+            tel = await adapter.status()
+            temp = tel.nozzle_temp
+        except Exception:  # noqa: BLE001  状态读取失败不阻塞
+            return True
+        if temp is None or temp <= limit:
+            return True
+        await _asyncio.sleep(5.0)
+        waited += 5.0
+    return False
+
+
 async def _download_stage(db: AsyncSession, job, payload: dict) -> ModelFile:
     """从模型源拉取指定实例并入库,返回 ModelFile。"""
     await jsvc.set_state(db, job, "downloading", "从模型源下载", 0.05)
@@ -183,16 +206,38 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
         remote_name = f"printbridge_{uuid.uuid4().hex[:8]}.gcode"
         remote = await adapter.send_file(str(storage.abs_path(out_rel)), remote_name)
         await jsvc.set_state(db, job, "uploading", "上传完成", 0.95)
+        if payload.get("auto_start", True):
+            # 上次打印若触发加热看门狗等故障,klippy 会锁死在 shutdown,
+            # 所有 G-code 被拒;先检测并自动恢复(firmware_restart)
+            st = await adapter.ensure_ready()
+            if st != "ready":
+                jsvc.append_log(job, f"[打印] 打印机状态 {st},尝试继续")
         # CFS 自动换料:用户选了料道时,启动打印前先切换(与屏幕「进料」同一宏链)
         tnn = str(payload.get("cfs_tnn") or "").strip().upper()
         if tnn and payload.get("auto_start", True):
             await jsvc.set_state(db, job, "uploading",
                                  f"切换 CFS 料道 {tnn}(约 20-60 秒)", 0.97)
+            switched = False
             try:
                 await adapter.select_slot(tnn)
+                switched = True
                 jsvc.append_log(job, f"[CFS] 已切换到料道 {tnn}")
             except Exception as exc:  # noqa: BLE001  换料失败不阻塞打印
                 jsvc.append_log(job, f"[CFS] 料道切换失败:{exc}")
+            if switched:
+                # 换料宏会把喷嘴烧到打印温度(如 PETG 250°C)且结束时不关加热,
+                # 而 K2 的 START_PRINT 是两级升温(140→180→目标),喷嘴远热于
+                # 目标时固件加热看门狗(verify_heater check_gain_time=60s)会因
+                # “温度不升”误判故障中止打印(key564)。先关加热并等喷嘴降到
+                # 一阶预热温度以下再开打,让升温呈正常上升曲线(约 1-2 分钟)。
+                await jsvc.set_state(db, job, "uploading",
+                                     "等待喷嘴降温(换料后),避免升温看门狗误判", 0.97)
+                try:
+                    await adapter.run_gcode("M104 S0")   # 关喷嘴加热,配合降温
+                except Exception:  # noqa: BLE001
+                    pass
+                if not await _wait_nozzle_cool(db, job, adapter, jsvc, limit=135.0):
+                    jsvc.append_log(job, "[CFS] 喷嘴降温等待超时,仍尝试开始打印")
         if payload.get("auto_start", True):
             await adapter.start_print(remote)
             # 跟踪打印最终结果(klippy_shutdown/error/completed),写回任务详情

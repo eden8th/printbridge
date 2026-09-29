@@ -131,6 +131,34 @@ async function cancel() {
   }
 }
 
+const canRetry = computed(() =>
+  job.value && ['failed', 'cancelled'].includes(job.value.state))
+
+// 重新打印:已完成的打印任务,用同样参数开一个新任务
+const canReprint = computed(() =>
+  job.value && job.value.kind === 'pipeline' && job.value.state === 'done'
+  && !(job.value.payload?.slice_only || job.value.payload?.download_only))
+
+async function retry() {
+  try {
+    await api.post(`/api/jobs/${route.params.id}/retry`)
+    showSuccessToast('已重新入队')
+    load()
+  } catch (e) {
+    showFailToast(e.message)
+  }
+}
+
+async function reprint() {
+  try {
+    const r = await api.post(`/api/jobs/${route.params.id}/reprint`)
+    showSuccessToast(`已创建新任务 #${r.job_id}`)
+    router.replace(`/jobs/${r.job_id}`)
+  } catch (e) {
+    showFailToast(e.message)
+  }
+}
+
 function del() {
   showConfirmDialog({ title: '删除任务', message: '删除后任务记录与日志不可恢复,确定?' })
     .then(async () => {
@@ -271,7 +299,17 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
     <!-- 操作 -->
     <div class="pb-row" style="margin-top:12px;gap:10px">
       <van-button v-if="!isEnded" block round type="warning" plain @click="cancel">取消任务</van-button>
-      <van-button v-if="isEnded" block round type="danger" plain @click="del">删除任务</van-button>
+      <template v-else>
+        <van-button v-if="canReprint" block round type="primary" style="flex:1"
+                    @click="reprint">重新打印</van-button>
+        <van-button v-if="canRetry" block round type="primary" style="flex:1"
+                    @click="retry">重试任务</van-button>
+        <van-button block round type="danger" plain style="flex:1"
+                    @click="del">删除任务</van-button>
+      </template>
+    </div>
+    <div v-if="canRetry && job.retries" class="pb-muted" style="margin-top:6px;text-align:center">
+      已重试 {{ job.retries }} 次
     </div>
   </div>
 
