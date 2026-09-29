@@ -82,3 +82,12 @@ class PrinterAdapter(ABC):
     async def select_slot(self, tnn: str) -> dict:
         """自动换料到指定料道(如 T1A);不适配的实现抛错。"""
         raise PrinterError("该打印机不支持料道切换")
+
+    async def run_gcode(self, script: str) -> None:
+        """发送原生 G-code;不支持原生指令的实现可忽略。"""
+        return None
+
+    async def ensure_ready(self, timeout: float = 90.0) -> str:
+        """确保打印机可接受指令(如 Klipper shutdown 时自动恢复);
+        不支持该概念的实现直接返回 ready。"""
+        return "ready"

@@ -123,17 +123,20 @@ async def _probe_creality(host: str, port: int) -> dict | None:
 
 
 def _match_bundle_key(text: str) -> str | None:
-    """按发现到的名字/主机名模糊匹配已知机型参数包(K2Pro-29BB → creality_k2pro)。"""
+    """按发现到的名字/主机名模糊匹配已知机型参数包(K2Pro-29BB → crealityk2pro)。
+
+    取最长命中:否则 "k2"(Creality K2)会先于 "k2pro"(Creality K2 Pro)命中。"""
     from app.slicing.registry import list_bundles
     norm = re.sub(r"[^a-z0-9]", "", (text or "").lower())
     if not norm:
         return None
+    best: tuple[int, str] | None = None
     for b in list_bundles():
         bn = re.sub(r"[^a-z0-9]", "", b.name.lower())   # "Creality K2 Pro" -> crealityk2pro
         short = bn.replace("creality", "")
-        if short and short in norm:
-            return b.key
-    return None
+        if short and short in norm and (best is None or len(short) > best[0]):
+            best = (len(short), b.key)
+    return best[1] if best else None
 
 
 async def _probe_moonraker(host: str, port: int) -> dict | None:
@@ -171,6 +174,17 @@ async def discover(cidr: str | None = None) -> dict:
         subnets = [str(net)]
     else:
         subnets = candidate_subnets()
+        # 容器部署时注入的额外网段(compose: PB_SCAN_CIDRS)
+        from app.core.config import settings
+        for c in settings.scan_cidrs.split(","):
+            c = c.strip()
+            if not c:
+                continue
+            try:
+                subnets.append(str(ipaddress.ip_network(c, strict=False)))
+            except ValueError:
+                pass
+        subnets = sorted(set(subnets))
     if not subnets:
         return {"scanned": [], "duration_sec": 0.0, "candidates": [],
                 "hint": "未识别到本机私网网段,请手动填写网段"}

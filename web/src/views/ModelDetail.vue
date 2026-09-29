@@ -67,14 +67,15 @@ const PRESET_COLORS = [
   { c: '#795548', n: '棕' },
 ]
 const selectedColorName = computed(() => {
+  if (pickedSlot.value)
+    return `CFS ${pickedSlot.value.box}${pickedSlot.value.slot} · `
+      + (pickedSlot.value.name || pickedSlot.value.material || '已装料')
   const c = (color.value || '').toLowerCase()
   const p = PRESET_COLORS.find((x) => x.c.toLowerCase() === c)
-  if (p) return p.n
-  const s = cfsSlots.value.find((x) => x.color.toLowerCase() === c)
-  return s ? `CFS ${s.box}-${s.index}` : '自定义'
+  return p ? p.n : '自定义'
 })
 
-// CFS 料道(真实颜色/材质,SSH 只读读取)
+// CFS 料道(真实颜色/材质,Moonraker box 对象直读)
 const cfsSlots = computed(() => {
   const out = []
   for (const b of cfsInfo.value?.boxes || []) {
@@ -84,28 +85,56 @@ const cfsSlots = computed(() => {
   }
   return out
 })
+const hasCfs = computed(() => cfsSlots.value.length > 0)
 
-function pickCfsSlot(s) {
-  color.value = s.color
-  cfsTnn.value = `${s.box}${s.slot}`
-  const f = filaments.value.find((x) =>
-    (x.type || '').toUpperCase().includes((s.material || '').toUpperCase()))
+const pickedSlot = ref(null)   // 当前选中的 CFS 槽位对象
+
+// 耗材材质跟随 CFS 槽位:先精确匹配产品名(如 Soleyin Basic PETG → 同名官方档),
+// 匹配不到再按材质类型回退(PETG → CR-PETG)。免密通道只有类型,配 SSH 密码才有产品名
+function syncFilamentToSlot() {
+  const s = pickedSlot.value
+  if (!s) return
+  const name = String(s.name || '').trim()
+  const fil = filaments.value
+  if (!fil.length) return
+  let f
+  if (name) {
+    const n = name.toLowerCase()
+    f = fil.find((x) => (x.name || '').toLowerCase() === n)
+      || fil.find((x) => (x.name || '').toLowerCase().includes(n))
+  }
+  if (!f && s.material)
+    f = fil.find((x) => (x.type || '').toUpperCase().includes(s.material.toUpperCase()))
   if (f) filamentId.value = f.id
 }
 
+function pickCfsSlot(s) {
+  pickedSlot.value = s
+  color.value = s.color
+  cfsTnn.value = s.slot   // 槽号已含盒号(如 T1A),直接用作换料指令的 TNN
+  syncFilamentToSlot()
+}
+
 function pickPreset(c) {
+  pickedSlot.value = null
   color.value = c.c
   cfsTnn.value = ''   // 手动预设色:不指定料道
 }
 
+// CFS 料道或切片耗材列表就绪后:默认选中第一个槽位;选项晚到时重新同步材质
+watch([cfsSlots, filaments], () => {
+  if (!hasCfs.value) return
+  if (!pickedSlot.value || !cfsSlots.value.includes(pickedSlot.value))
+    pickCfsSlot(cfsSlots.value[0])
+  else syncFilamentToSlot()
+})
+
 const colorHint = computed(() => {
-  if (cfsSlots.value.length)
-    return '✅ 已读取 CFS 料道(真实颜色):点击料道自动匹配耗材;开始打印前请确认打印机当前供料料道一致'
+  if (hasCfs.value)
+    return '✅ 已同步 CFS 实时装料:颜色/槽位/材质来自打印机,切片配色与换料自动一致'
   if (!cfsInfo.value || cfsInfo.value.available === false)
     return '常见耗材预设色;切片配色写入 G-code,实际供料由打印机当前装料决定'
-  if (cfsInfo.value.connected)
-    return 'CFS 已连接,但未读到料道明细(需在打印机编辑里配置 SSH 密码)'
-  return '检测到 CFS 能力但未读到料道装料;打印将使用打印机当前装料料道'
+  return '检测到 CFS 但未读到装料槽位;打印将使用打印机当前装料料道'
 })
 
 // 从模型版本名自动推断喷嘴/材质(如 "0.2mm喷嘴, 0.06mm层高")
@@ -313,19 +342,21 @@ async function importOnly() {
       <van-field label="打印颜色" readonly>
         <template #input>
           <div class="pb-colors">
-            <template v-if="cfsSlots.length">
+            <!-- 有 CFS:只显示真实料道;无 CFS:显示常见耗材预设色 -->
+            <template v-if="hasCfs">
               <span v-for="s in cfsSlots" :key="s.box + s.slot"
-                    class="pb-dot" :class="{ active: color.toLowerCase() === s.color.toLowerCase() }"
+                    class="pb-dot" :class="{ active: pickedSlot && pickedSlot.box === s.box && pickedSlot.slot === s.slot }"
                     :style="{ background: s.color }"
-                    :title="`CFS 料道${s.index} · ${s.material} · ${s.name}`"
+                    :title="`CFS 料道${s.box}${s.slot} · ${s.name || s.material}`"
                     @click="pickCfsSlot(s)">
-                <span class="pb-slotnum">{{ s.index }}</span>
+                <span class="pb-slotnum">{{ s.box.replace('T', '') }}{{ 'ABCD'[s.index - 1] || s.index }}</span>
               </span>
-              <span class="pb-slotsep">|</span>
             </template>
-            <span v-for="c in PRESET_COLORS" :key="c.c" class="pb-dot"
-                  :class="{ active: color.toLowerCase() === c.c }"
-                  :style="{ background: c.c }" :title="c.n" @click="pickPreset(c)"></span>
+            <template v-else>
+              <span v-for="c in PRESET_COLORS" :key="c.c" class="pb-dot"
+                    :class="{ active: color.toLowerCase() === c.c }"
+                    :style="{ background: c.c }" :title="c.n" @click="pickPreset(c)"></span>
+            </template>
           </div>
         </template>
       </van-field>

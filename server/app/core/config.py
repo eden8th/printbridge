@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # 远程文件下载单文件上限(防滥用/防炸弹),默认 2GB
     max_download_bytes: int = 2 * 1024**3
 
+    # 局域网发现:额外扫描的网段(逗号分隔 CIDR)。容器部署时容器内只能看到
+    # Docker 网桥网段,需在 compose 中显式注入,如 PB_SCAN_CIDRS=192.168.8.0/24
+    scan_cidrs: str = ""
+
 
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)

@@ -7,10 +7,10 @@ Moonraker REST API 文档完善:
   控制: POST /printer/print/{pause|resume|cancel}
 鉴权:X-Api-Key 头(未设 force_api_key 时可省略)。
 
-CFS 料道状态(创想 K 系列):标准 Klipper/Moonraker 接口不暴露料道表,
-通过 SSH 只读打印机内部文件 /mnt/UDISK/creality/userdata/box/
-material_box_info.json 获取(需在打印机设置里开启 root 并配置密码)。
-实测颜色编码:#0RRGGBB(7位,首 0 为填充),解码取末 6 位。
+CFS 料道状态(创想 K 系列):标准 Klipper/Moonraker 接口不暴露料道表。
+优先级:Moonraker `box` 对象(API 直读,免凭证)→ SSH 只读读取
+/mnt/UDISK/creality/userdata/box/material_box_info.json(需打印机开启 root 并配密码)。
+实测颜色编码:0RRGGBB / #0RRGGBB(7位,首 0 为填充),解码取末 6 位。
 """
 from __future__ import annotations
 
@@ -33,12 +33,12 @@ BOX_INFO_PATH = "/mnt/UDISK/creality/userdata/box/material_box_info.json"
 
 
 def _decode_color(raw: str) -> str:
-    """'#0fff014' → '#fff014'(K2 的 7 位编码,首位 0 为填充);标准 6 位原样返回。"""
-    c = str(raw or "").strip()
-    if re.fullmatch(r"#0[0-9a-fA-F]{6}", c):
+    """'#0fff014' / '0fff014' → '#fff014'(K2 的 7 位编码,首位 0 为填充);标准 6 位原样返回。"""
+    c = str(raw or "").strip().lstrip("#")
+    if re.fullmatch(r"0[0-9a-fA-F]{6}", c):
         return "#" + c[-6:].lower()
-    if re.fullmatch(r"#[0-9a-fA-F]{6}", c):
-        return c.lower()
+    if re.fullmatch(r"[0-9a-fA-F]{6}", c):
+        return "#" + c.lower()
     return ""
 
 
@@ -59,6 +59,55 @@ def _ssh_read_box_info(host: str, password: str,
             c.close()
         except Exception:
             pass
+
+
+def _parse_box_object(box: dict) -> dict:
+    """解析 Moonraker `box` 对象(创想 K 系列魔改固件暴露的 CFS 总状态)。
+
+    结构:box.T1..T4 各为一个 CFS,每槽 color_value[i]/material_type[i];
+    材质是 RFID 代码(001001=PLA、006005=PETG),名称映射取自 same_material
+    ([code, color, [槽位], 材质名]),映射缺失时原样展示代码。"""
+    mat_names: dict[str, str] = {}
+    for row in box.get("same_material") or []:
+        if isinstance(row, (list, tuple)) and len(row) >= 4:
+            mat_names.setdefault(str(row[0]), str(row[3]))
+    boxes = []
+    for key in sorted(k for k, v in box.items()
+                      if re.fullmatch(r"T\d", k) and isinstance(v, dict)):
+        b = box[key]
+        if str(b.get("type") or "") not in ("", "CFS"):
+            continue
+        colors = b.get("color_value") or []
+        mats = b.get("material_type") or []
+        slots = []
+        for i, (c, m) in enumerate(zip(colors, mats), start=1):
+            color = _decode_color(c)
+            if not color:
+                continue
+            code = str(m or "").strip()
+            slots.append({
+                "index": i,
+                "slot": f"{key}{'ABCD'[i - 1]}",
+                "color": color,
+                "material": mat_names.get(code, code),
+                "name": mat_names.get(code, code),
+                "brand": "",
+                "temp_min": None,
+                "temp_max": None,
+                "rfid": any(x for x in (b.get("uuid") or [])),
+            })
+        if not slots:
+            continue
+        boxes.append({
+            "box": key,
+            "state": str(b.get("state") or ""),
+            "type": str(b.get("type") or "CFS"),
+            "temperature": b.get("temperature"),
+            "humidity": b.get("dry_and_humidity"),
+            "slots": slots,
+        })
+    connected = any(b["state"] == "connect" and b["slots"] for b in boxes)
+    return {"available": True, "connected": connected, "boxes": boxes}
 
 
 def _parse_box_info(data: dict) -> dict:
@@ -163,8 +212,11 @@ class MoonrakerAdapter(PrinterAdapter):
         return {"ok": True, "tnn": tnn}
 
     async def cfs_status(self) -> dict | None:
-        """CFS 料道状态:优先 SSH 只读读取料盒文件(颜色/材质/名称),
-        未配置 SSH 密码时回退到 filament_rack 对象(仅 RFID 读取瞬间有值)。"""
+        """CFS 料道状态,按优先级:
+        1. SSH 只读读取料盒文件(需配 SSH 密码):颜色/材质/品牌/产品名齐全,
+           可精确匹配切片耗材档(如 Soleyin Basic PETG)
+        2. Moonraker `box` 对象(API 直读,免凭证):颜色/材质类型,无产品名
+        3. filament_rack 对象回退(仅 RFID 读取瞬间有值)。"""
         pwd = str(self.settings.get("ssh_password") or "")
         if pwd:
             try:
@@ -173,7 +225,16 @@ class MoonrakerAdapter(PrinterAdapter):
                 if data:
                     return _parse_box_info(data)
             except Exception:
-                pass  # SSH 失败走回退
+                pass  # SSH 失败走免密通道
+        try:
+            resp = await self._client.get("/printer/objects/query?box")
+            box = (resp.json().get("result", {}).get("status") or {}).get("box")
+            if box:
+                parsed = _parse_box_object(box)
+                if parsed["boxes"]:
+                    return parsed
+        except (httpx.HTTPError, ValueError):
+            pass  # 接口异常继续走回退
         try:
             resp = await self._client.get(
                 "/printer/objects/query?filament_rack")
@@ -188,6 +249,41 @@ class MoonrakerAdapter(PrinterAdapter):
         loaded = color not in ("-1", "") and material not in ("-1", "")
         return {"available": True, "connected": loaded,
                 "boxes": [], "raw": rack}
+
+    async def ensure_ready(self, timeout: float = 90.0) -> str:
+        """klippy 停机(如加热看门狗 key564 触发后的 shutdown)时自动恢复。
+
+        Klipper 加热器故障会锁死到 shutdown,所有 G-code 均被拒绝,
+        必须 FIRMWARE_RESTART。返回恢复后的状态(ready/shutdown/offline...)。
+        """
+        try:
+            info = (await self._client.get("/printer/info")).json().get("result", {})
+        except (httpx.HTTPError, ValueError):
+            return "offline"
+        if info.get("state") != "shutdown":
+            return str(info.get("state") or "unknown")
+        try:
+            await self._client.post("/printer/firmware_restart")
+        except httpx.HTTPError:
+            pass
+        waited = 0.0
+        while waited < timeout:
+            await asyncio.sleep(3.0)
+            try:
+                info = (await self._client.get("/printer/info")).json().get("result", {})
+            except (httpx.HTTPError, ValueError):
+                pass
+            else:
+                state = str(info.get("state") or "")
+                if state == "ready":
+                    return "ready"
+                if state and state != "shutdown":
+                    return state
+            waited += 3.0
+        return "shutdown"
+
+    async def run_gcode(self, script: str) -> None:
+        await self._command("/printer/gcode/script", {"script": script})
 
     async def send_file(self, local_path: str, remote_name: str) -> str:
         p = Path(local_path)
