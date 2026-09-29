@@ -119,6 +119,7 @@ async def list_library(db: AsyncSession = Depends(get_db),
     return [{
         "id": m.id, "title": m.title, "cover": m.cover_url,
         "source": m.source, "source_url": m.source_url, "author": m.author,
+        "source_design_id": m.source_design_id,
         "created_at": m.created_at.isoformat(),
         "files": [{"id": f.id, "name": f.name, "size": f.size,
                    "kind": f.kind, "meta": f.meta} for f in m.files],

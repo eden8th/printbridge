@@ -95,6 +95,22 @@ function del(m) {
     }).catch(() => {})
 }
 
+// 来源模型(MakerWorld 等)可跳详情页选版本后一键打印;
+// 本地上传(source=upload)/切片产物(source=sliced)没有线上设计页
+function canOpen(m) {
+  return !!m.source_design_id && /^\d+$/.test(String(m.source_design_id))
+    && !['upload', 'sliced'].includes(m.source)
+}
+
+function openModel(m) {
+  if (batchMode.value) { toggleSelect(m); return }
+  if (canOpen(m)) {
+    router.push(`/model/${m.source}/${m.source_design_id}`)
+  } else if (m.source === 'upload') {
+    showFailToast('本地上传的模型暂不支持详情页,请通过任务页切片打印')
+  }
+}
+
 function fmtSize(n) {
   if (!n) return ''
   if (n > 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`
@@ -128,7 +144,7 @@ onUnmounted(() => store.off(onLib))
 
     <div class="pb-grid">
       <div v-for="m in models" :key="m.id" class="pb-card clickable"
-           @click="batchMode ? toggleSelect(m) : undefined">
+           @click="openModel(m)">
         <div class="pb-row">
           <van-checkbox v-if="batchMode" :model-value="selected.has(m.id)"
                         checked-color="#1989fa" style="margin-right:4px"
@@ -140,6 +156,7 @@ onUnmounted(() => store.off(onLib))
               {{ m.source }} · @{{ m.author || '-' }}
             </div>
           </div>
+          <van-icon v-if="!batchMode && canOpen(m)" name="arrow" color="#969799" size="18" />
           <van-icon v-if="!batchMode" name="delete-o" color="#ee0a24" size="20" @click="del(m)" />
         </div>
         <div v-for="f in m.files" :key="f.id"
