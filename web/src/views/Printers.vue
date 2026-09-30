@@ -11,30 +11,12 @@ const printers = ref([])
 const adapters = ref([])
 const models = ref([])     // 可选机型(= 切片参数包列表)
 const showForm = ref(false)
-const testing = ref(false)
 const editing = ref(null)
 
-// 摄像头快照:打开状态/时间戳(强制刷新)/失败标记(如创想私有 WebRTC 机型)
-const camOpen = reactive({})
-const camTs = reactive({})
-const camFail = reactive({})
-let camTimer = null
-
-function camUrl(p) {
-  return `/api/printers/${p.id}/camera?ts=${camTs[p.id] || 0}`
-}
-function toggleCam(p) {
-  camOpen[p.id] = !camOpen[p.id]
-  camFail[p.id] = false
-  if (camOpen[p.id]) camTs[p.id] = Date.now()
-}
-function refreshCam(p) {
-  camFail[p.id] = false
-  camTs[p.id] = Date.now()
-}
-function camError(p) {
-  camFail[p.id] = true
-}
+// 卡片缩略图:进页面时拍一帧(不轮询,保持列表轻量);失败显示占位
+const thumbFail = reactive({})
+const thumbTs = ref(Date.now())
+const thumbUrl = (p) => `/api/printers/${p.id}/camera?ts=${thumbTs.value}`
 
 const form = ref({
   name: '', adapter: 'creality_ws', host: '', port: null, secret: '',
@@ -130,19 +112,6 @@ async function save() {
   }
 }
 
-async function test(p) {
-  testing.value = true
-  try {
-    const tel = await api.post(`/api/printers/${p.id}/test`)
-    showSuccessToast(`连通:${tel.state} 喷嘴 ${tel.nozzle_temp ?? '?'}℃`)
-    load()
-  } catch (e) {
-    showFailToast(`不通:${e.message}`)
-  } finally {
-    testing.value = false
-  }
-}
-
 async function remove(p) {
   await api.del(`/api/printers/${p.id}`)
   load()
@@ -159,18 +128,11 @@ async function control(p, action) {
 
 const telOf = (p) => store.printers[p.id] || p.telemetry
 const stateColor = { printing: '#07c160', idle: '#1989fa', paused: '#ff976a', error: '#ee0a24', offline: '#969799' }
+const stateText = { printing: '打印中', idle: '空闲', paused: '已暂停', error: '故障', offline: '离线' }
 
 const onTel = () => { /* store.printers 本身响应式,无需处理 */ }
-onMounted(() => {
-  load()
-  store.on(onTel)
-  camTimer = setInterval(() => {
-    for (const id of Object.keys(camOpen)) {
-      if (camOpen[id]) camTs[id] = Date.now()
-    }
-  }, 5000)
-})
-onUnmounted(() => { store.off(onTel); clearInterval(camTimer) })
+onMounted(() => { load(); store.on(onTel) })
+onUnmounted(() => store.off(onTel))
 </script>
 
 <template>
@@ -184,58 +146,44 @@ onUnmounted(() => { store.off(onTel); clearInterval(camTimer) })
     <van-empty v-if="!printers.length" description="还没有打印机,点右上角添加" />
 
     <div class="pb-grid">
-      <div v-for="p in printers" :key="p.id" class="pb-card clickable"
+      <div v-for="p in printers" :key="p.id" class="pb-card clickable pc-card"
            @click="router.push(`/printers/${p.id}`)">
-        <div class="pb-row">
-          <div class="pb-grow">
-            <div style="font-weight:600">
-              {{ p.name }}
-              <span class="pb-muted" style="font-weight:400">{{ p.adapter }} · {{ p.host }}</span>
+        <!-- 主视觉:摄像头快照(加载失败退化为渐变占位) -->
+        <div class="pc-visual" @click.stop="router.push(`/printers/${p.id}`)">
+          <img v-if="!thumbFail[p.id]" :src="thumbUrl(p)" @error="thumbFail[p.id] = true" />
+          <div v-else class="pc-visual-ph">
+            <van-icon name="printer" size="30" />
+          </div>
+          <div class="pc-visual-tags">
+            <van-tag :color="stateColor[telOf(p)?.state] || '#969799'">
+              {{ stateText[telOf(p)?.state] || telOf(p)?.state || '未连接' }}
+            </van-tag>
+            <van-tag v-if="telOf(p)?.cfs_connected" color="#ff976a">CFS</van-tag>
+          </div>
+        </div>
+
+        <div class="pb-row" style="margin-top:10px;padding:0 12px">
+          <div class="pb-grow pb-ellipsis">
+            <div style="font-weight:600">{{ p.name }}</div>
+            <div class="pb-muted" style="font-size:12px;margin-top:2px">
+              {{ p.adapter }} · {{ p.host }}
             </div>
           </div>
-          <van-tag v-if="telOf(p)?.cfs_connected" color="#ff976a">CFS</van-tag>
-          <van-tag :color="stateColor[telOf(p)?.state] || '#969799'">
-            {{ telOf(p)?.state || '未连接' }}
-          </van-tag>
+          <van-icon name="edit" color="#1989fa" size="18"
+                    style="margin-right:10px" @click.stop="openEdit(p)" />
+          <van-icon name="delete-o" color="#969799" size="18" @click.stop="remove(p)" />
         </div>
 
-        <div v-if="telOf(p)" class="pb-row" style="margin-top:8px;gap:16px;flex-wrap:wrap">
-          <span class="pb-muted">喷嘴 {{ telOf(p).nozzle_temp ?? '-' }} /
-            {{ telOf(p).nozzle_target ?? '-' }}℃</span>
-          <span class="pb-muted">热床 {{ telOf(p).bed_temp ?? '-' }} /
-            {{ telOf(p).bed_target ?? '-' }}℃</span>
-          <span v-if="telOf(p).progress != null" class="pb-muted">
-            {{ Math.round(telOf(p).progress * 100) }}%</span>
-          <span v-if="telOf(p).filename" class="pb-muted pb-ellipsis">
+        <div class="pb-row pc-stats" style="margin-top:8px">
+          <span class="pc-stat">喷嘴 <b>{{ telOf(p)?.nozzle_temp ?? '-' }}</b>/{{
+            telOf(p)?.nozzle_target || 0 }}°</span>
+          <span class="pc-stat">热床 <b>{{ telOf(p)?.bed_temp ?? '-' }}</b>/{{
+            telOf(p)?.bed_target || 0 }}°</span>
+          <span v-if="telOf(p)?.progress" class="pc-stat pb-grow pb-ellipsis">
             {{ telOf(p).filename }}</span>
         </div>
-
-        <van-progress v-if="telOf(p)?.progress != null" :percentage="Math.round(telOf(p).progress * 100)"
-                      style="margin-top:6px" />
-
-        <div class="pb-row" style="margin-top:10px" @click.stop>
-          <van-button size="small" plain type="primary" :loading="testing" @click="test(p)">测试</van-button>
-          <van-button size="small" plain @click="openEdit(p)">编辑</van-button>
-          <van-button size="small" plain :type="camOpen[p.id] ? 'success' : 'default'"
-                      @click="toggleCam(p)">摄像头</van-button>
-          <van-button size="small" plain @click="control(p, 'pause')">暂停</van-button>
-          <van-button size="small" plain @click="control(p, 'resume')">恢复</van-button>
-          <van-button size="small" plain type="danger" @click="control(p, 'stop')">停止</van-button>
-          <span class="pb-grow"></span>
-          <van-icon name="delete-o" color="#969799" @click="remove(p)" />
-        </div>
-
-        <!-- 摄像头快照(5 秒自动刷新) -->
-        <div v-if="camOpen[p.id]" style="margin-top:8px" @click.stop>
-          <img v-if="!camFail[p.id]" :src="camUrl(p)" @error="camError(p)"
-               style="width:100%;border-radius:8px;background:#f7f8fa;min-height:80px" />
-          <div v-else class="pb-muted" style="background:#f7f8fa;border-radius:8px;padding:12px;text-align:center">
-            摄像头快照不可用:该机型可能使用私有视频协议(如创想 K 系列本地 WebRTC),
-            或未在 Moonraker 中配置 webcam
-          </div>
-          <van-button v-if="!camFail[p.id]" size="mini" plain style="margin-top:4px"
-                      @click="refreshCam(p)">刷新</van-button>
-        </div>
+        <van-progress v-if="telOf(p)?.progress" :percentage="Math.round(telOf(p).progress * 100)"
+                      style="margin:8px 12px 0" />
       </div>
     </div>
 
@@ -293,4 +241,14 @@ onUnmounted(() => { store.off(onTel); clearInterval(camTimer) })
 
 <style scoped>
 .pb-select { width: 100%; border: 1px solid #ebedf0; border-radius: 6px; padding: 4px 8px; }
+.pc-card { padding: 0 0 12px; overflow: hidden; }
+.pc-visual { position: relative; background: linear-gradient(135deg, #eef2f7, #e4e9f2); }
+.pc-visual img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.pc-visual-ph {
+  aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;
+  color: #c8c9cc;
+}
+.pc-visual-tags { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; }
+.pc-stats { gap: 12px; font-size: 12px; color: #969799; padding: 0 12px; }
+.pc-stat b { font-weight: 600; color: #323233; }
 </style>
