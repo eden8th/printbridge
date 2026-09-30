@@ -116,14 +116,25 @@ async def list_library(db: AsyncSession = Depends(get_db),
         select(ModelRecord).where(ModelRecord.user_id == user.id)
         .options(selectinload(ModelRecord.files))
         .order_by(ModelRecord.created_at.desc()))
-    return [{
-        "id": m.id, "title": m.title, "cover": m.cover_url,
-        "source": m.source, "source_url": m.source_url, "author": m.author,
-        "source_design_id": m.source_design_id,
-        "created_at": m.created_at.isoformat(),
-        "files": [{"id": f.id, "name": f.name, "size": f.size,
-                   "kind": f.kind, "meta": f.meta} for f in m.files],
-    } for m in res.scalars()]
+    items = []
+    for m in res.scalars():
+        cover = m.cover_url
+        if not cover and m.source == "sliced":
+            # 旧数据兜底:切片产物的封面取其切片任务缩略图
+            for f in m.files:
+                job_id = (f.meta or {}).get("job_id")
+                if job_id and (f.meta or {}).get("thumbnail_path"):
+                    cover = f"/api/jobs/{job_id}/thumbnail"
+                    break
+        items.append({
+            "id": m.id, "title": m.title, "cover": cover,
+            "source": m.source, "source_url": m.source_url, "author": m.author,
+            "source_design_id": m.source_design_id,
+            "created_at": m.created_at.isoformat(),
+            "files": [{"id": f.id, "name": f.name, "size": f.size,
+                       "kind": f.kind, "meta": f.meta} for f in m.files],
+        })
+    return items
 
 
 @router.get("/library/files/{file_id}/download")

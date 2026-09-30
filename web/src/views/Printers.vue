@@ -1,8 +1,11 @@
 <script setup>
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { showFailToast, showSuccessToast } from 'vant'
 import { api } from '../api'
 import { store } from '../store'
+
+const router = useRouter()
 
 const printers = ref([])
 const adapters = ref([])
@@ -181,7 +184,8 @@ onUnmounted(() => { store.off(onTel); clearInterval(camTimer) })
     <van-empty v-if="!printers.length" description="还没有打印机,点右上角添加" />
 
     <div class="pb-grid">
-      <div v-for="p in printers" :key="p.id" class="pb-card">
+      <div v-for="p in printers" :key="p.id" class="pb-card clickable"
+           @click="router.push(`/printers/${p.id}`)">
         <div class="pb-row">
           <div class="pb-grow">
             <div style="font-weight:600">
@@ -209,7 +213,7 @@ onUnmounted(() => { store.off(onTel); clearInterval(camTimer) })
         <van-progress v-if="telOf(p)?.progress != null" :percentage="Math.round(telOf(p).progress * 100)"
                       style="margin-top:6px" />
 
-        <div class="pb-row" style="margin-top:10px">
+        <div class="pb-row" style="margin-top:10px" @click.stop>
           <van-button size="small" plain type="primary" :loading="testing" @click="test(p)">测试</van-button>
           <van-button size="small" plain @click="openEdit(p)">编辑</van-button>
           <van-button size="small" plain :type="camOpen[p.id] ? 'success' : 'default'"
@@ -222,7 +226,7 @@ onUnmounted(() => { store.off(onTel); clearInterval(camTimer) })
         </div>
 
         <!-- 摄像头快照(5 秒自动刷新) -->
-        <div v-if="camOpen[p.id]" style="margin-top:8px">
+        <div v-if="camOpen[p.id]" style="margin-top:8px" @click.stop>
           <img v-if="!camFail[p.id]" :src="camUrl(p)" @error="camError(p)"
                style="width:100%;border-radius:8px;background:#f7f8fa;min-height:80px" />
           <div v-else class="pb-muted" style="background:#f7f8fa;border-radius:8px;padding:12px;text-align:center">

@@ -193,11 +193,11 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
             return {}
 
     if payload.get("slice_only"):
-        # 切片产物入库(kind=gcode),供后续手动推送
+        # 切片产物入库(kind=gcode),供后续手动推送;封面用切片任务缩略图
         record = ModelRecord(user_id=job.user_id, source="sliced",
                              source_design_id=str(job.id),
                              title=f"{file_row.name} (切片产物)",
-                             cover_url="")
+                             cover_url=f"/api/jobs/{job.id}/thumbnail")
         db.add(record)
         await db.flush()
         g = ModelFile(model_id=record.id, user_id=job.user_id,
