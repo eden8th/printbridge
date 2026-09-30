@@ -99,6 +99,12 @@ async def printer_camera(printer_id: int, db: AsyncSession = Depends(get_db),
                 continue
             if r.status_code == 200 and r.content.startswith(b"\xff\xd8"):
                 return Response(r.content, media_type="image/jpeg")
+    # go2rtc sidecar:创想 K 系私有 WebRTC(WebRTC 候选须为宿主机 LAN IP,
+    # 故 go2rtc 以 host 网络容器运行)
+    from app.services.camera import go2rtc_frame
+    data = await go2rtc_frame(p.id, p.host)
+    if data:
+        return Response(data, media_type="image/jpeg")
     raise HTTPException(404, "未找到可用的摄像头快照(该机型可能使用私有视频协议)")
 
 

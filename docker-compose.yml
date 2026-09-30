@@ -10,6 +10,8 @@ services:
     restart: unless-stopped
     ports:
       - "8002:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 访问 camera 容器(1984)
     environment:
       # 生产用 PostgreSQL;数据卷见 volumes 段
       PB_DATABASE_URL: postgresql+asyncpg://printbridge:printbridge@db:5432/printbridge
@@ -21,6 +23,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # 摄像头 go2rtc sidecar:host 网络(ICE 候选须为宿主机 LAN IP,
+  # bridge 容器地址打印机不可达——实测结论);随镜像带 ffmpeg 做截帧转码;
+  # 流由后端按需经 API 注册(webrtc:…#format=creality)
+  camera:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: printbridge-camera
+    restart: unless-stopped
+    network_mode: host
+    command: ["go2rtc", "-config", "/app/go2rtc.yaml"]
 
   db:
     image: postgres:16-alpine

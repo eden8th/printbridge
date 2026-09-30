@@ -27,3 +27,5 @@ tools/orca/
 
 # 切片引擎二进制(Docker 构建前下载到 vendor/,不入库)
 vendor/*.AppImage
+vendor/go2rtc/go2rtc
+vendor/go2rtc/*.jpg

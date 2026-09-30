@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Docker 网桥网段,需在 compose 中显式注入,如 PB_SCAN_CIDRS=192.168.8.0/24
     scan_cidrs: str = ""
 
+    # 摄像头 go2rtc sidecar API(camera 容器,host 网络)
+    camera_api: str = "http://host.docker.internal:1984"
+
 
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)

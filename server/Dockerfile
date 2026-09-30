@@ -10,6 +10,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server/app ./app
 # 官方切片参数包随镜像分发
 COPY server/profiles ./profiles
+# go2rtc(单静态二进制):摄像头 WebRTC sidecar,内置创想 K 系协议;
+# frame.jpeg 截帧需 ffmpeg 做 H264→JPEG 转码(官方 go2rtc 镜像国内拉不动,随本镜像装)
+COPY vendor/go2rtc/go2rtc /usr/local/bin/go2rtc
+RUN chmod +x /usr/local/bin/go2rtc
+# go2rtc 配置(camera 容器以 host 网络运行,引用 /app/go2rtc.yaml)
+COPY vendor/go2rtc/go2rtc.yaml /app/go2rtc.yaml
 # 前端构建产物随镜像分发
 # 注意:容器内 main.py 位于 /app/app/main.py,其 parents[2] 是 /(而非 WORKDIR /app),
 # 故前端目录须位于 /web/dist 才能被 SPA 回退路由找到
@@ -27,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
         libsm6 libice6 libxcomposite1 libxdamage1 libxfixes3 \
         libxcursor1 libxrandr2 libxi6 libxtst6 libxinerama1 \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && chmod +x /tmp/orca.AppImage \
     && cd /opt && /tmp/orca.AppImage --appimage-extract \

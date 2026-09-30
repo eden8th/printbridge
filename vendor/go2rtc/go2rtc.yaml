@@ -1,0 +1,9 @@
+api:
+  listen: ":1984"
+rtsp:
+  listen: ""
+webrtc:
+  listen: ":8555"
+  ice_servers: []
+log:
+  level: warn
