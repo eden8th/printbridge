@@ -110,8 +110,40 @@ function pickPreset(c) {
   cfsTnn.value = ''   // 手动预设色:不指定料道
 }
 
-// CFS 料道或切片耗材列表就绪后:默认选中第一个槽位;选项晚到时重新同步材质
+// 切片参数记忆:按打印机恢复上次提交的喷嘴/耗材/工艺/CFS 料道/颜色。
+// 选项(CFS 料道、耗材工艺列表)异步到达,故在多个就绪点尝试,restoredFor 防重放
+const restoredFor = ref(null)
+
+function tryRestore() {
+  const lp = printer.value?.settings?.last_print
+  if (!lp || restoredFor.value === printerId.value) return false
+  if (lp.bundle !== bundle.value?.key) {
+    restoredFor.value = printerId.value
+    return false
+  }
+  restoredFor.value = printerId.value
+  const m = String(lp.machine_id || '').match(/(\d+(?:\.\d+)?)\s*nozzle/i)
+  if (m && nozzles.value.some((n) => n.nozzle === m[1])) nozzle.value = m[1]
+  const fid = (lp.filament_ids || [])[0]
+  if (fid && filaments.value.some((x) => x.id === fid)) filamentId.value = fid
+  if (lp.process_id && processes.value.some((x) => x.id === lp.process_id)) {
+    processId.value = lp.process_id
+  }
+  const tnn = String(lp.cfs_tnn || '')
+  const slot = cfsSlots.value.find((s) => s.slot === tnn)
+  if (slot) {
+    pickCfsSlot(slot)
+  } else if (!hasCfs.value && /^#[0-9a-fA-F]{6}$/.test(lp.filament_colors?.[0] || '')) {
+    pickedSlot.value = null
+    color.value = lp.filament_colors[0]
+    cfsTnn.value = ''
+  }
+  return true
+}
+
+// CFS 料道或切片耗材列表就绪后:先尝试恢复上次配置,否则默认选中第一个槽位
 watch([cfsSlots, filaments], () => {
+  if (tryRestore()) return
   if (!hasCfs.value) return
   if (!pickedSlot.value || !cfsSlots.value.includes(pickedSlot.value))
     pickCfsSlot(cfsSlots.value[0])
@@ -139,13 +171,18 @@ function pickDefaults() {
 async function loadOptions() {
   if (!bundle.value || !nozzle.value) return
   const k = optionsKey.value
-  if (optionsCache.value[k]) return ensureDefaults()
+  if (optionsCache.value[k]) {
+    ensureDefaults()
+    tryRestore()   // 命中缓存时 watch 不触发,这里显式补一次恢复
+    return
+  }
   try {
     const o = await api.get(
       `/api/profiles/${bundle.value.key}/options?nozzle=${encodeURIComponent(nozzle.value)}`)
     optionsCache.value = { ...optionsCache.value, [k]: o }
   } catch { /* 拉取失败时下拉为空,提交前有校验 */ }
   ensureDefaults()
+  tryRestore()
 }
 
 function ensureDefaults() {
@@ -175,6 +212,7 @@ watch(() => props.materialHint, () => {
 
 // 换打印机 → 机型/参数包/CFS 状态联动
 watch(printerId, async () => {
+  restoredFor.value = null
   pickDefaults()
   cfsInfo.value = null
   pickedSlot.value = null
@@ -182,6 +220,7 @@ watch(printerId, async () => {
   if (printerId.value) {
     try { cfsInfo.value = await api.get(`/api/printers/${printerId.value}/cfs`) }
     catch { cfsInfo.value = null }
+    tryRestore()   // CFS 数据先于切片选项到达时也要能恢复
   }
 })
 

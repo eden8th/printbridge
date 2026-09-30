@@ -42,6 +42,21 @@ async def oneclick(body: OneClickBody, db: AsyncSession = Depends(get_db),
     """核心接口:搜索页点「一键打印」即调这里。"""
     if not body.model_file_id and not (body.source and body.design_id):
         raise HTTPException(400, "需要 model_file_id 或 source+design_id")
+    printer = await db.get(Printer, body.printer_id)
+    if printer is None or printer.user_id != user.id:
+        raise HTTPException(404, "打印机不存在")
+    # 切片参数记忆:按打印机记住本次配置,下次打开配置弹层自动填充
+    settings = dict(printer.settings or {})
+    settings["last_print"] = {
+        "bundle": body.bundle,
+        "machine_id": body.machine_id,
+        "filament_ids": body.filament_ids,
+        "filament_colors": body.filament_colors,
+        "process_id": body.process_id,
+        "cfs_tnn": body.cfs_tnn,
+    }
+    printer.settings = settings
+    await db.commit()
     job = await jsvc.create_job(
         db, user.id, kind="pipeline", printer_id=body.printer_id,
         model_file_id=body.model_file_id,

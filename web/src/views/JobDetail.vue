@@ -107,6 +107,17 @@ function diagnoseError(e) {
 }
 const failureHint = computed(() => diagnoseError(job.value?.error))
 
+// 打印机侧最终状态的简短文案
+const PRINT_STATUS_TEXT = {
+  completed: '打印完成',
+  error: '打印机报错终止',
+  klippy_shutdown: 'Klipper 紧急关机,打印中断',
+  cancelled: '已被取消',
+}
+const printStatusText = computed(() =>
+  PRINT_STATUS_TEXT[job.value?.result?.print_status]
+  || job.value?.result?.print_status || '')
+
 async function load() {
   try {
     job.value = await api.get(`/api/jobs/${route.params.id}`)
@@ -208,6 +219,20 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
       </div>
       <van-progress v-if="job.progress > 0 && !isEnded"
                     :percentage="Math.round(job.progress * 100)" />
+      <!-- 打印机侧最终结果(print_watch 回写):完成绿卡 / 故障橙卡 -->
+      <div v-if="job.result?.print_status === 'completed'"
+           style="margin-top:10px;background:#e8f7ee;color:#07c160;border-radius:8px;padding:10px;font-size:13px">
+        🎉 打印完成,取件时留意热床仍在高温
+      </div>
+      <div v-else-if="job.result?.print_status && job.result.print_status !== 'in_progress'"
+           style="margin-top:10px;background:#fff7f0;color:#ff976a;border-radius:8px;padding:10px;font-size:13px">
+        <div>⚠️ 打印机侧结果:{{ printStatusText }}</div>
+        <div v-if="job.result.print_diagnosis" style="margin-top:4px">
+          💡 {{ job.result.print_diagnosis }}
+        </div>
+        <van-button v-if="canReprint" size="mini" plain type="primary" style="margin-top:6px"
+                    @click="reprint">重新打印</van-button>
+      </div>
       <div v-if="job.error" style="margin-top:10px;color:#ee0a24;font-size:13px">
         ⚠️ {{ job.error }}
         <div v-if="failureHint" class="pb-muted" style="color:#969799;margin-top:2px">
