@@ -285,6 +285,25 @@ class MoonrakerAdapter(PrinterAdapter):
     async def run_gcode(self, script: str) -> None:
         await self._command("/printer/gcode/script", {"script": script})
 
+    async def light_state(self) -> bool | None:
+        """腔体灯状态(K2:output_pin LED);不可查返回 None。"""
+        try:
+            resp = await self._client.get("/printer/objects/query",
+                                          params={"output_pin LED": None})
+            pin = (resp.json().get("result", {}).get("status") or {}).get(
+                "output_pin LED")
+        except (httpx.HTTPError, ValueError):
+            return None
+        if pin is None:
+            return None
+        try:
+            return float(pin.get("value") or 0) > 0.5
+        except (TypeError, ValueError):
+            return None
+
+    async def set_light(self, on: bool) -> None:
+        await self.run_gcode(f"SET_PIN PIN=LED VALUE={1 if on else 0}")
+
     async def send_file(self, local_path: str, remote_name: str) -> str:
         p = Path(local_path)
         try:

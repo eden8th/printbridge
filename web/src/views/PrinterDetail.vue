@@ -40,6 +40,29 @@ function refreshCam() {
   camTs.value = Date.now()
 }
 
+// 腔体灯
+const lightOn = ref(null)      // null = 不可查
+const lightBusy = ref(false)
+async function loadLight() {
+  try {
+    const r = await api.get(`/api/printers/${id.value}/light`)
+    lightOn.value = r.on
+  } catch { lightOn.value = null }
+}
+async function toggleLight() {
+  if (lightBusy.value || lightOn.value === null) return
+  lightBusy.value = true
+  try {
+    await api.post(`/api/printers/${id.value}/light`, { on: !lightOn.value })
+    lightOn.value = !lightOn.value
+    refreshCam()
+  } catch (e) {
+    showFailToast(e.message)
+  } finally {
+    lightBusy.value = false
+  }
+}
+
 // CFS 料道(含手工库存)
 async function loadCfs() {
   try { cfsInfo.value = await api.get(`/api/printers/${id.value}/cfs`) }
@@ -81,6 +104,7 @@ onMounted(async () => {
     showFailToast(e.message)
   }
   loadCfs()
+  loadLight()
   refreshCam()
   camTimer = setInterval(() => { camTs.value = Date.now() }, 5000)
 })
@@ -122,6 +146,11 @@ onUnmounted(() => clearInterval(camTimer))
       <div class="pb-card">
         <div class="pb-row">
           <h3 class="pb-title pb-grow" style="margin:0">摄像头</h3>
+          <van-button v-if="lightOn !== null" size="mini" plain
+                      :type="lightOn ? 'warning' : 'default'"
+                      :loading="lightBusy" @click="toggleLight">
+            {{ lightOn ? '关灯' : '开灯' }}
+          </van-button>
           <van-button size="mini" plain @click="refreshCam">刷新</van-button>
         </div>
         <img v-if="!camFail" :src="camUrl" @error="camFail = true"

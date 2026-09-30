@@ -108,6 +108,44 @@ async def printer_camera(printer_id: int, db: AsyncSession = Depends(get_db),
     raise HTTPException(404, "未找到可用的摄像头快照(该机型可能使用私有视频协议)")
 
 
+@router.get("/{printer_id}/light")
+async def get_light(printer_id: int, db: AsyncSession = Depends(get_db),
+                    user: User = Depends(current_user)):
+    """腔体灯状态(on=true 开);不可查返回 on=null。"""
+    p = await db.get(Printer, printer_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(404, "打印机不存在")
+    adapter = build_adapter(p)
+    try:
+        return {"on": await adapter.light_state()}
+    finally:
+        if hasattr(adapter, "aclose"):
+            await adapter.aclose()
+
+
+class LightBody(BaseModel):
+    on: bool
+
+
+@router.post("/{printer_id}/light")
+async def set_light(printer_id: int, body: LightBody,
+                    db: AsyncSession = Depends(get_db),
+                    user: User = Depends(current_user)):
+    """开关腔体灯。"""
+    p = await db.get(Printer, printer_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(404, "打印机不存在")
+    adapter = build_adapter(p)
+    try:
+        await adapter.set_light(body.on)
+        return {"ok": True, "on": body.on}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        if hasattr(adapter, "aclose"):
+            await adapter.aclose()
+
+
 class DiscoverBody(BaseModel):
     cidr: str | None = None   # 可选,如 192.168.8.0/24;默认自动探测本机网段
 
