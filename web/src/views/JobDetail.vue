@@ -123,6 +123,12 @@ async function load() {
 
 async function cancel() {
   try {
+    await showConfirmDialog({
+      title: '取消打印',
+      message: '确定取消该任务?打印机上正在进行的打印将同时中止,已消耗的耗材不退回。',
+    })
+  } catch { return }
+  try {
     await api.post(`/api/jobs/${route.params.id}/cancel`)
     showSuccessToast('已取消')
     load()

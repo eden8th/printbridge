@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { showFailToast, showSuccessToast } from 'vant'
 import { api } from '../api'
 import { store } from '../store'
@@ -10,6 +10,28 @@ const models = ref([])     // 可选机型(= 切片参数包列表)
 const showForm = ref(false)
 const testing = ref(false)
 const editing = ref(null)
+
+// 摄像头快照:打开状态/时间戳(强制刷新)/失败标记(如创想私有 WebRTC 机型)
+const camOpen = reactive({})
+const camTs = reactive({})
+const camFail = reactive({})
+let camTimer = null
+
+function camUrl(p) {
+  return `/api/printers/${p.id}/camera?ts=${camTs[p.id] || 0}`
+}
+function toggleCam(p) {
+  camOpen[p.id] = !camOpen[p.id]
+  camFail[p.id] = false
+  if (camOpen[p.id]) camTs[p.id] = Date.now()
+}
+function refreshCam(p) {
+  camFail[p.id] = false
+  camTs[p.id] = Date.now()
+}
+function camError(p) {
+  camFail[p.id] = true
+}
 
 const form = ref({
   name: '', adapter: 'creality_ws', host: '', port: null, secret: '',
@@ -136,8 +158,16 @@ const telOf = (p) => store.printers[p.id] || p.telemetry
 const stateColor = { printing: '#07c160', idle: '#1989fa', paused: '#ff976a', error: '#ee0a24', offline: '#969799' }
 
 const onTel = () => { /* store.printers 本身响应式,无需处理 */ }
-onMounted(() => { load(); store.on(onTel) })
-onUnmounted(() => store.off(onTel))
+onMounted(() => {
+  load()
+  store.on(onTel)
+  camTimer = setInterval(() => {
+    for (const id of Object.keys(camOpen)) {
+      if (camOpen[id]) camTs[id] = Date.now()
+    }
+  }, 5000)
+})
+onUnmounted(() => { store.off(onTel); clearInterval(camTimer) })
 </script>
 
 <template>
@@ -182,11 +212,25 @@ onUnmounted(() => store.off(onTel))
         <div class="pb-row" style="margin-top:10px">
           <van-button size="small" plain type="primary" :loading="testing" @click="test(p)">测试</van-button>
           <van-button size="small" plain @click="openEdit(p)">编辑</van-button>
+          <van-button size="small" plain :type="camOpen[p.id] ? 'success' : 'default'"
+                      @click="toggleCam(p)">摄像头</van-button>
           <van-button size="small" plain @click="control(p, 'pause')">暂停</van-button>
           <van-button size="small" plain @click="control(p, 'resume')">恢复</van-button>
           <van-button size="small" plain type="danger" @click="control(p, 'stop')">停止</van-button>
           <span class="pb-grow"></span>
           <van-icon name="delete-o" color="#969799" @click="remove(p)" />
+        </div>
+
+        <!-- 摄像头快照(5 秒自动刷新) -->
+        <div v-if="camOpen[p.id]" style="margin-top:8px">
+          <img v-if="!camFail[p.id]" :src="camUrl(p)" @error="camError(p)"
+               style="width:100%;border-radius:8px;background:#f7f8fa;min-height:80px" />
+          <div v-else class="pb-muted" style="background:#f7f8fa;border-radius:8px;padding:12px;text-align:center">
+            摄像头快照不可用:该机型可能使用私有视频协议(如创想 K 系列本地 WebRTC),
+            或未在 Moonraker 中配置 webcam
+          </div>
+          <van-button v-if="!camFail[p.id]" size="mini" plain style="margin-top:4px"
+                      @click="refreshCam(p)">刷新</van-button>
         </div>
       </div>
     </div>

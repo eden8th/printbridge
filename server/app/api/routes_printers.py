@@ -56,6 +56,52 @@ async def list_adapters():
     return adapter_keys()
 
 
+@router.get("/{printer_id}/camera")
+async def printer_camera(printer_id: int, db: AsyncSession = Depends(get_db),
+                         user: User = Depends(current_user)):
+    """打印机摄像头快照(JPEG)。
+
+    Moonraker 机型:优先取 /server/webcams/list 注册的快照地址,
+    退回常见 mjpeg-streamer 路径;创想 K 系列(creality_ws)摄像头走
+    私有 WebRTC 协议(9999 信令),无本地 HTTP 快照,明确返回不可用。
+    """
+    import httpx
+    from fastapi.responses import Response
+
+    p = await db.get(Printer, printer_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(404, "打印机不存在")
+    if p.adapter != "moonraker":
+        raise HTTPException(404, "该打印机类型暂不支持本地摄像头快照")
+    base = f"http://{p.host}:{p.port or 7125}"
+    candidates: list[str] = []
+    async with httpx.AsyncClient(timeout=6) as c:
+        try:
+            r = await c.get(f"{base}/server/webcams/list")
+            for w in r.json().get("result", {}).get("webcams") or []:
+                url = w.get("snapshot_url") or w.get("stream_url")
+                if not url:
+                    continue
+                if url.startswith("/"):
+                    # 相对路径:webcam 服务与 moonraker 同主机,location 可能带端口
+                    loc = str(w.get("location") or "").strip("/")
+                    candidates.append(f"http://{p.host}{('/' + loc) if loc else ''}{url}")
+                else:
+                    candidates.append(url)
+        except (httpx.HTTPError, ValueError):
+            pass
+        candidates += [f"http://{p.host}/webcam/?action=snapshot",
+                       f"http://{p.host}:8080/?action=snapshot"]
+        for url in candidates:
+            try:
+                r = await c.get(url)
+            except httpx.HTTPError:
+                continue
+            if r.status_code == 200 and r.content.startswith(b"\xff\xd8"):
+                return Response(r.content, media_type="image/jpeg")
+    raise HTTPException(404, "未找到可用的摄像头快照(该机型可能使用私有视频协议)")
+
+
 class DiscoverBody(BaseModel):
     cidr: str | None = None   # 可选,如 192.168.8.0/24;默认自动探测本机网段
 

@@ -258,14 +258,16 @@ async function submit() {
     <van-field label="打印颜色" readonly>
       <template #input>
         <div class="pb-colors">
-          <!-- 有 CFS:只显示真实料道;无 CFS:显示常见耗材预设色 -->
+          <!-- 有 CFS:只显示真实料道(带槽位号与材质角标);无 CFS:显示常见耗材预设色 -->
           <template v-if="hasCfs">
-            <span v-for="s in cfsSlots" :key="s.box + s.slot"
-                  class="pb-dot" :class="{ active: pickedSlot && pickedSlot.box === s.box && pickedSlot.slot === s.slot }"
-                  :style="{ background: s.color }"
+            <span v-for="s in cfsSlots" :key="s.box + s.slot" class="pb-slot"
                   :title="`CFS 料道${s.box}${s.slot} · ${s.name || s.material}`"
                   @click="pickCfsSlot(s)">
-              <span class="pb-slotnum">{{ s.box.replace('T', '') }}{{ 'ABCD'[s.index - 1] || s.index }}</span>
+              <span class="pb-dot" :class="{ active: pickedSlot && pickedSlot.box === s.box && pickedSlot.slot === s.slot }"
+                    :style="{ background: s.color }">
+                <span class="pb-slotnum">{{ s.box.replace('T', '') }}{{ 'ABCD'[s.index - 1] || s.index }}</span>
+              </span>
+              <span class="pb-slotmat">{{ s.material || '已装料' }}</span>
             </span>
           </template>
           <template v-else>
@@ -313,6 +315,11 @@ async function submit() {
   align-items: center; justify-content: center;
 }
 .pb-dot.active { box-shadow: 0 0 0 2px var(--pb-primary); }
+.pb-slot {
+  display: inline-flex; flex-direction: column; align-items: center;
+  gap: 2px; cursor: pointer;
+}
+.pb-slotmat { font-size: 9px; color: #969799; line-height: 1; }
 .pb-slotnum {
   font-size: 10px; color: #fff; text-shadow: 0 0 2px #000; font-weight: 700;
 }
