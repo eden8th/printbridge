@@ -7,6 +7,7 @@ import { store } from '../store'
 
 const router = useRouter()
 const jobs = ref([])
+const stats = ref(null)
 const batchMode = ref(false)
 const selected = ref(new Set())
 
@@ -16,6 +17,10 @@ async function load() {
   } catch (e) {
     showFailToast(e.message)
   }
+}
+
+async function loadStats() {
+  try { stats.value = await api.get('/api/jobs/stats') } catch { /* 静默 */ }
 }
 
 const stateColor = {
@@ -107,6 +112,7 @@ const onJob = (_t) => syncFromWs()
 let timer = null
 onMounted(() => {
   load()
+  loadStats()
   store.on(onJob)
   timer = setInterval(load, 8000)
 })
@@ -123,6 +129,15 @@ onUnmounted(() => { store.off(onJob); clearInterval(timer) })
         </span>
       </template>
     </van-nav-bar>
+
+    <!-- 使用统计(北极星:成功打印次数) -->
+    <div v-if="stats && stats.total" class="pb-muted pb-row"
+         style="padding:6px 16px;font-size:12px;justify-content:center">
+      <span>任务 {{ stats.total }}</span><span>·</span>
+      <span>成功率 {{ stats.success_rate ?? '-' }}%</span><span>·</span>
+      <span>成功打印 {{ stats.prints_completed }} 次</span><span v-if="stats.avg_slice_sec">·</span>
+      <span v-if="stats.avg_slice_sec">平均切片 {{ stats.avg_slice_sec }}s</span>
+    </div>
 
     <van-empty v-if="!jobs.length" description="还没有任务。去「发现」页挑个模型一键打印吧" />
 
