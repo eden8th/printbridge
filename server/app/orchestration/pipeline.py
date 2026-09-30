@@ -12,6 +12,7 @@ payload 约定(kind=pipeline / slice):
 """
 from __future__ import annotations
 
+import time
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -147,8 +148,16 @@ async def _slice_stage(db: AsyncSession, job, payload: dict, file_row: ModelFile
     return result, final_rel, thumb_rel
 
 
+async def _mark_stage(db: AsyncSession, job, stages: dict, name: str, t0: float) -> None:
+    """阶段耗时埋点:写入 job.result.stages,供任务统计聚合。"""
+    stages[name] = round(time.monotonic() - t0, 1)
+    job.result = {**(job.result or {}), "stages": dict(stages)}
+    await db.commit()
+
+
 async def run_pipeline(db: AsyncSession, job) -> dict:
     payload = job.payload or {}
+    stages: dict = {}
 
     if payload.get("download_only"):
         await _download_stage(db, job, payload)
@@ -164,14 +173,24 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
         if file_row is None or file_row.user_id != job.user_id:
             raise PipelineError("模型文件不存在")
     else:
+        t0 = time.monotonic()
         file_row = await _download_stage(db, job, payload)
+        await _mark_stage(db, job, stages, "download", t0)
         if await _check_cancelled(db, job):
             return {}
 
-    # 2) 切片
-    result, out_rel, thumb_rel = await _slice_stage(db, job, payload, file_row)
-    if await _check_cancelled(db, job):
-        return {}
+    # 2) 库内 G-code 直接推送打印(模型库「推送打印」入口):跳过切片
+    if payload.get("print_gcode"):
+        out_rel = file_row.path
+        thumb_rel = str((file_row.meta or {}).get("thumbnail_path") or "")
+        result = None
+    else:
+        # 2) 切片
+        t0 = time.monotonic()
+        result, out_rel, thumb_rel = await _slice_stage(db, job, payload, file_row)
+        await _mark_stage(db, job, stages, "slice", t0)
+        if await _check_cancelled(db, job):
+            return {}
 
     if payload.get("slice_only"):
         # 切片产物入库(kind=gcode),供后续手动推送
@@ -196,6 +215,7 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
                 "thumbnail_path": thumb_rel}
 
     # 3) 上传 + 打印
+    t0 = time.monotonic()
     await jsvc.set_state(db, job, "uploading", "上传 G-code 到打印机", 0.8)
     printer = await db.get(Printer, job.printer_id)
     if printer is None or printer.user_id != job.user_id:
@@ -247,9 +267,15 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
         if hasattr(adapter, "aclose"):
             await adapter.aclose()
 
-    await jsvc.set_state(db, job, "done",
-                         "已发送打印指令,可在打印机页观察进度", 1.0)
+    await _mark_stage(db, job, stages, "upload", t0)
+    if payload.get("auto_start", True):
+        await jsvc.set_state(db, job, "done",
+                             "已发送打印指令,可在打印机页观察进度", 1.0)
+    else:
+        await jsvc.set_state(db, job, "done",
+                             "已上传到打印机(未自动开始),可到打印机页选择文件开始", 1.0)
+    meta = file_row.meta or {}
     return {"gcode_path": out_rel, "remote_file": remote,
             "thumbnail_path": thumb_rel,
-            "estimated_sec": result.estimated_sec,
-            "filament_grams": result.filament_grams}
+            "estimated_sec": result.estimated_sec if result else meta.get("estimated_sec", 0),
+            "filament_grams": result.filament_grams if result else meta.get("filament_grams", 0)}

@@ -1,9 +1,9 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { api } from '../api'
-import { store } from '../store'
+import PrintConfigPopup from '../components/PrintConfigPopup.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,19 +11,9 @@ const design = ref(null)
 const loading = ref(true)
 const selected = ref(null)          // 选中的 instance
 const showPrint = ref(false)
-
-// 一键打印表单
-const printers = ref([])
-const profiles = ref([])
-const printerId = ref(null)
-const nozzle = ref('')
-const processId = ref('')
-const filamentId = ref('')
-const color = ref('#F2F2F2')
-const cfsTnn = ref('')      // 选中的 CFS 料道(如 T1A),打印前自动换料
-const autoStart = ref(true)
+const materialHint = ref('')        // 从模型版本名推断的材质期望
+const nozzleHint = ref('')          // 从模型版本名推断的喷嘴
 const hasToken = ref(true)   // 未拉到设置前默认有,避免误拦
-const cfsInfo = ref(null)    // 打印机 CFS 料道状态
 
 // 从模型源下载需要用户本人凭证:没配则当场引导,避免任务提交后失败
 async function ensureToken() {
@@ -40,103 +30,6 @@ async function ensureToken() {
   return false
 }
 
-// 机型参数包跟随所选打印机的机型(打印机设置里选择)
-const printer = computed(() => printers.value.find((p) => p.id === printerId.value))
-const bundle = computed(() => {
-  const key = printer.value?.settings?.model
-  return profiles.value.find((b) => b.key === key) || profiles.value[0] || null
-})
-const modelMissing = computed(() => !!printer.value && !printer.value.settings?.model)
-const nozzles = computed(() => bundle.value?.nozzles || [])
-const machineId = computed(() =>
-  nozzles.value.find((n) => n.nozzle === nozzle.value)?.machine_id || '')
-
-// 耗材/工艺按需拉取(机型+喷嘴)
-const optionsCache = ref({})
-const optionsKey = computed(() =>
-  bundle.value && nozzle.value ? `${bundle.value.key}|${nozzle.value}` : '')
-const filaments = computed(() => optionsCache.value[optionsKey.value]?.filaments || [])
-const processes = computed(() => optionsCache.value[optionsKey.value]?.processes || [])
-const materialHint = ref('')   // 从模型版本名推断的材质期望
-
-// 常见耗材预设色(无 CFS 料道数据时手动匹配)
-const PRESET_COLORS = [
-  { c: '#1A1A1A', n: '黑' }, { c: '#F2F2F2', n: '白' }, { c: '#8C8C8C', n: '灰' },
-  { c: '#D32F2F', n: '红' }, { c: '#F57C00', n: '橙' }, { c: '#FBC02D', n: '黄' },
-  { c: '#388E3C', n: '绿' }, { c: '#1976D2', n: '蓝' }, { c: '#7B1FA2', n: '紫' },
-  { c: '#795548', n: '棕' },
-]
-const selectedColorName = computed(() => {
-  if (pickedSlot.value)
-    return `CFS ${pickedSlot.value.box}${pickedSlot.value.slot} · `
-      + (pickedSlot.value.name || pickedSlot.value.material || '已装料')
-  const c = (color.value || '').toLowerCase()
-  const p = PRESET_COLORS.find((x) => x.c.toLowerCase() === c)
-  return p ? p.n : '自定义'
-})
-
-// CFS 料道(真实颜色/材质,Moonraker box 对象直读)
-const cfsSlots = computed(() => {
-  const out = []
-  for (const b of cfsInfo.value?.boxes || []) {
-    (b.slots || []).forEach((s, i) => {
-      if (s.color) out.push({ ...s, index: s.index || i + 1, box: b.box })
-    })
-  }
-  return out
-})
-const hasCfs = computed(() => cfsSlots.value.length > 0)
-
-const pickedSlot = ref(null)   // 当前选中的 CFS 槽位对象
-
-// 耗材材质跟随 CFS 槽位:先精确匹配产品名(如 Soleyin Basic PETG → 同名官方档),
-// 匹配不到再按材质类型回退(PETG → CR-PETG)。免密通道只有类型,配 SSH 密码才有产品名
-function syncFilamentToSlot() {
-  const s = pickedSlot.value
-  if (!s) return
-  const name = String(s.name || '').trim()
-  const fil = filaments.value
-  if (!fil.length) return
-  let f
-  if (name) {
-    const n = name.toLowerCase()
-    f = fil.find((x) => (x.name || '').toLowerCase() === n)
-      || fil.find((x) => (x.name || '').toLowerCase().includes(n))
-  }
-  if (!f && s.material)
-    f = fil.find((x) => (x.type || '').toUpperCase().includes(s.material.toUpperCase()))
-  if (f) filamentId.value = f.id
-}
-
-function pickCfsSlot(s) {
-  pickedSlot.value = s
-  color.value = s.color
-  cfsTnn.value = s.slot   // 槽号已含盒号(如 T1A),直接用作换料指令的 TNN
-  syncFilamentToSlot()
-}
-
-function pickPreset(c) {
-  pickedSlot.value = null
-  color.value = c.c
-  cfsTnn.value = ''   // 手动预设色:不指定料道
-}
-
-// CFS 料道或切片耗材列表就绪后:默认选中第一个槽位;选项晚到时重新同步材质
-watch([cfsSlots, filaments], () => {
-  if (!hasCfs.value) return
-  if (!pickedSlot.value || !cfsSlots.value.includes(pickedSlot.value))
-    pickCfsSlot(cfsSlots.value[0])
-  else syncFilamentToSlot()
-})
-
-const colorHint = computed(() => {
-  if (hasCfs.value)
-    return '✅ 已同步 CFS 实时装料:颜色/槽位/材质来自打印机,切片配色与换料自动一致'
-  if (!cfsInfo.value || cfsInfo.value.available === false)
-    return '常见耗材预设色;切片配色写入 G-code,实际供料由打印机当前装料决定'
-  return '检测到 CFS 但未读到装料槽位;打印将使用打印机当前装料料道'
-})
-
 // 从模型版本名自动推断喷嘴/材质(如 "0.2mm喷嘴, 0.06mm层高")
 function inferNozzle(name) {
   const s = String(name || '')
@@ -151,78 +44,21 @@ function inferMaterial(name) {
   return ''
 }
 
-function pickDefaults() {
-  if (!bundle.value) return
-  nozzle.value = bundle.value.nozzles?.some((n) => n.nozzle === '0.4') ? '0.4'
-    : (bundle.value.nozzles?.[0]?.nozzle || '')
-}
-
-async function loadOptions() {
-  if (!bundle.value || !nozzle.value) return
-  const k = optionsKey.value
-  if (optionsCache.value[k]) return ensureDefaults()
-  try {
-    const o = await api.get(
-      `/api/profiles/${bundle.value.key}/options?nozzle=${encodeURIComponent(nozzle.value)}`)
-    optionsCache.value = { ...optionsCache.value, [k]: o }
-  } catch { /* 拉取失败时下拉为空,提交前有校验 */ }
-  ensureDefaults()
-}
-
-function ensureDefaults() {
-  const fil = filaments.value
-  if (!fil.length) return
-  if (materialHint.value) {
-    const f = fil.find((x) => (x.type || '').toUpperCase().includes(materialHint.value))
-    if (f) {
-      filamentId.value = f.id
-      materialHint.value = ''
-      return
-    }
-  }
-  if (!fil.some((x) => x.id === filamentId.value)) {
-    filamentId.value = fil.find((x) => x.name === 'CR-PLA')?.id || fil[0]?.id || ''
-  }
-  const pro = processes.value
-  if (!pro.some((x) => x.id === processId.value)) {
-    processId.value = pro.find((x) => x.name.includes('0.20mm Standard'))?.id
-      || pro[0]?.id || ''
-  }
-}
-
-// 换打印机 → 机型/参数包/CFS 状态联动
-watch(printerId, async () => {
-  pickDefaults()
-  cfsInfo.value = null
-  if (printerId.value) {
-    try { cfsInfo.value = await api.get(`/api/printers/${printerId.value}/cfs`) }
-    catch { cfsInfo.value = null }
-  }
-})
-
-// 换模型版本 → 自动填充喷嘴/材质
+// 换模型版本 → 自动填充喷嘴/材质期望(传入配置弹层)
 watch(selected, () => {
   const name = selected.value?.name || ''
   materialHint.value = inferMaterial(name)
-  const nz = inferNozzle(name)
-  if (nz && nozzles.value.some((n) => n.nozzle === nz)) nozzle.value = nz
+  nozzleHint.value = inferNozzle(name)
 })
-
-// 机型/喷嘴变化 → 拉取对应耗材工艺
-watch([bundle, nozzle], () => loadOptions())
 
 onMounted(async () => {
   try {
     design.value = await api.get(
       `/api/sources/${route.params.source}/design/${route.params.id}`)
     selected.value = design.value.instances[0] || null
-    const [ps, pr] = await Promise.all([api.get('/api/printers'), api.get('/api/profiles')])
-    printers.value = ps
-    profiles.value = pr
     api.get('/api/settings').then((s) => {
       hasToken.value = !!s.makerworld?.token
     }).catch(() => {})
-    if (ps.length) printerId.value = ps[0].id
   } catch (e) {
     showFailToast(e.message)
   } finally {
@@ -230,31 +66,14 @@ onMounted(async () => {
   }
 })
 
-async function submitOneClick() {
+async function openPrint() {
   if (!(await ensureToken())) return
-  if (!bundle.value) return showFailToast('打印机未设置机型:请到「打印机→编辑」选择')
-  if (!machineId.value) return showFailToast('请选择喷嘴直径')
-  if (!filamentId.value) return showFailToast('请选择耗材材质')
-  try {
-    const res = await api.post('/api/jobs/oneclick', {
-      source: route.params.source,
-      design_id: route.params.id,
-      instance_id: selected.value?.instance_id,
-      printer_id: printerId.value,
-      bundle: bundle.value.key,
-      machine_id: machineId.value,
-      filament_ids: [filamentId.value],
-      filament_colors: [color.value],
-      process_id: processId.value,
-      cfs_tnn: cfsTnn.value || null,
-      auto_start: autoStart.value,
-    })
-    showPrint.value = false
-    showSuccessToast(`任务 #${res.job_id} 已提交`)
-    router.push('/jobs')
-  } catch (e) {
-    showFailToast(e.message)
-  }
+  showPrint.value = true
+}
+
+function onSubmitted(jobId) {
+  showSuccessToast(`任务 #${jobId} 已提交`)
+  router.push('/jobs')
 }
 
 async function importOnly() {
@@ -304,88 +123,23 @@ async function importOnly() {
     </div><!-- /pb-cols -->
 
     <van-button type="primary" block round size="large" :disabled="!selected"
-                @click="showPrint = true">
+                @click="openPrint">
       一键打印
     </van-button>
     <van-button block round style="margin-top:8px" :disabled="!selected" @click="importOnly">
       仅下载到模型库
     </van-button>
 
-    <!-- 一键打印配置弹层 -->
-    <van-popup v-model:show="showPrint" position="bottom" round style="padding:16px">
-      <h3 class="pb-title">一键打印配置</h3>
-      <van-cell title="打印机" is-link
-                :value="printer?.name || '请先添加打印机'"
-                @click="!printers.length && router.push('/printers')" />
-      <van-cell title="机型" :value="bundle?.name || '未设置'" />
-      <div v-if="modelMissing" class="pb-muted" style="padding:0 16px 4px">
-        该打印机未设置机型,当前使用默认参数包;可在「打印机 → 编辑」中选择正确机型
-      </div>
-      <van-field label="喷嘴直径" readonly>
-        <template #input>
-          <van-radio-group v-model="nozzle" direction="horizontal">
-            <van-radio v-for="n in nozzles" :key="n.nozzle" :name="n.nozzle">
-              {{ n.nozzle }} mm
-            </van-radio>
-          </van-radio-group>
-        </template>
-      </van-field>
-      <van-field label="耗材材质" readonly>
-        <template #input>
-          <select v-model="filamentId" class="pb-select">
-            <option v-for="f in filaments" :key="f.id" :value="f.id">
-              {{ f.name }}{{ f.type ? `(${f.type})` : '' }}
-            </option>
-          </select>
-        </template>
-      </van-field>
-      <van-field label="打印颜色" readonly>
-        <template #input>
-          <div class="pb-colors">
-            <!-- 有 CFS:只显示真实料道;无 CFS:显示常见耗材预设色 -->
-            <template v-if="hasCfs">
-              <span v-for="s in cfsSlots" :key="s.box + s.slot"
-                    class="pb-dot" :class="{ active: pickedSlot && pickedSlot.box === s.box && pickedSlot.slot === s.slot }"
-                    :style="{ background: s.color }"
-                    :title="`CFS 料道${s.box}${s.slot} · ${s.name || s.material}`"
-                    @click="pickCfsSlot(s)">
-                <span class="pb-slotnum">{{ s.box.replace('T', '') }}{{ 'ABCD'[s.index - 1] || s.index }}</span>
-              </span>
-            </template>
-            <template v-else>
-              <span v-for="c in PRESET_COLORS" :key="c.c" class="pb-dot"
-                    :class="{ active: color.toLowerCase() === c.c }"
-                    :style="{ background: c.c }" :title="c.n" @click="pickPreset(c)"></span>
-            </template>
-          </div>
-        </template>
-      </van-field>
-      <div class="pb-muted" style="padding:0 16px 4px">
-        {{ selectedColorName }} · {{ colorHint }}
-      </div>
-      <van-field label="工艺层厚" readonly>
-        <template #input>
-          <select v-model="processId" class="pb-select">
-            <option v-for="p in processes" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
-        </template>
-      </van-field>
-      <div v-if="cfsTnn" class="pb-muted" style="padding:0 16px 4px">
-        🎯 打印前将自动换料到 CFS 料道 <b>{{ cfsTnn }}</b>(与屏幕「进料」同一流程,约 20-60 秒)
-      </div>
-      <van-cell title="切片后自动开始打印">
-        <template #right-icon>
-          <van-switch v-model="autoStart" size="22" />
-        </template>
-      </van-cell>
-      <van-button type="primary" block round style="margin-top:10px"
-                  :disabled="!printerId" @click="submitOneClick">
-        开始下载并切片
-      </van-button>
-      <div v-if="!printers.length" class="pb-muted" style="text-align:center;margin-top:8px">
-        还没有打印机,请到「打印机」页添加
-      </div>
-    </van-popup>
+    <!-- 打印配置弹层(共用组件):basePayload 携带模型源定位,凭证已在 openPrint 校验 -->
+    <PrintConfigPopup v-model:show="showPrint"
+                      :base-payload="{
+                        source: route.params.source,
+                        design_id: route.params.id,
+                        instance_id: selected?.instance_id,
+                      }"
+                      :material-hint="materialHint"
+                      :nozzle-hint="nozzleHint"
+                      @submitted="onSubmitted" />
   </div>
 
   <van-loading v-else-if="loading" center style="margin-top:40%">加载中...</van-loading>
@@ -394,16 +148,4 @@ async function importOnly() {
 
 <style scoped>
 .summary :deep(img) { max-width: 100%; }
-.pb-select { width: 100%; border: 1px solid #ebedf0; border-radius: 6px; padding: 4px 8px; }
-.pb-colors { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.pb-dot {
-  width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
-  border: 2px solid #fff; box-shadow: 0 0 0 1px #dcdee0; display: inline-flex;
-  align-items: center; justify-content: center;
-}
-.pb-dot.active { box-shadow: 0 0 0 2px var(--pb-primary); }
-.pb-slotnum {
-  font-size: 10px; color: #fff; text-shadow: 0 0 2px #000; font-weight: 700;
-}
-.pb-slotsep { color: #dcdee0; margin: 0 2px; }
 </style>

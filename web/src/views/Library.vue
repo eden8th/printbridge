@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { watch, computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { api, uploadFile } from '../api'
 import { store } from '../store'
 import { useIsMobile } from '../composables/useDevice'
+import PrintConfigPopup from '../components/PrintConfigPopup.vue'
 
 const router = useRouter()
 const isMobile = useIsMobile()
@@ -14,6 +15,74 @@ const batchMode = ref(false)
 const selected = ref(new Set())
 const showLinkImport = ref(false)
 const shareUrl = ref('')
+
+// 切片打印配置弹层(3MF/STL 模型文件)
+const showPrint = ref(false)
+const printFile = ref(null)
+const printPayload = computed(() =>
+  printFile.value ? { model_file_id: printFile.value.id } : {})
+
+function openPrint(f) {
+  printFile.value = f
+  showPrint.value = true
+}
+
+// G-code 推送打印(跳过切片,直接上传启动)
+const showPush = ref(false)
+const pushFile = ref(null)
+const pushPrinters = ref([])
+const pushPrinterId = ref(null)
+const pushCfs = ref('')
+const pushAuto = ref(true)
+const pushSlots = ref([])
+
+async function openPush(f) {
+  pushFile.value = f
+  pushCfs.value = ''
+  pushSlots.value = []
+  if (!pushPrinters.value.length) {
+    try { pushPrinters.value = await api.get('/api/printers') } catch { /* 提交时校验 */ }
+  }
+  showPush.value = true
+}
+
+// 选打印机 → 拉 CFS 料道(可选换料)
+watch(pushPrinterId, async () => {
+  pushSlots.value = []
+  pushCfs.value = ''
+  if (!pushPrinterId.value) return
+  try {
+    const info = await api.get(`/api/printers/${pushPrinterId.value}/cfs`)
+    for (const b of info?.boxes || [])
+      (b.slots || []).forEach((s) => {
+        if (s.color) pushSlots.value.push({
+          tnn: s.slot, label: `${s.slot} · ${s.material || '已装料'}`, color: s.color,
+        })
+      })
+  } catch { /* 无 CFS 时无选项 */ }
+})
+
+async function submitPush() {
+  if (!pushPrinterId.value) return showFailToast('请选择打印机')
+  try {
+    const r = await api.post('/api/jobs/print-gcode', {
+      file_id: pushFile.value.id,
+      printer_id: pushPrinterId.value,
+      cfs_tnn: pushCfs.value || null,
+      auto_start: pushAuto.value,
+    })
+    showPush.value = false
+    showSuccessToast(`任务 #${r.job_id} 已提交`)
+    router.push('/jobs')
+  } catch (e) {
+    showFailToast(e.message)
+  }
+}
+
+function onSubmitted(jobId) {
+  showSuccessToast(`任务 #${jobId} 已提交`)
+  router.push('/jobs')
+}
 
 async function importFromLink() {
   const url = shareUrl.value.trim()
@@ -163,12 +232,53 @@ onUnmounted(() => store.off(onLib))
              class="pb-row" style="margin-top:8px;background:#f7f8fa;border-radius:8px;padding:8px">
           <van-icon name="description" size="18" />
           <div class="pb-grow pb-ellipsis pb-muted">{{ f.name }} · {{ fmtSize(f.size) }}</div>
-          <a v-if="!batchMode" :href="`/api/library/files/${f.id}/download`">
-            <van-button size="mini" plain>下载</van-button>
-          </a>
+          <template v-if="!batchMode">
+            <van-button v-if="['3mf', 'stl'].includes(f.kind)" size="mini" plain type="primary"
+                        style="margin-right:6px" @click.stop="openPrint(f)">打印</van-button>
+            <van-button v-else-if="f.kind === 'gcode'" size="mini" plain type="primary"
+                        style="margin-right:6px" @click.stop="openPush(f)">推送打印</van-button>
+            <a :href="`/api/library/files/${f.id}/download`">
+              <van-button size="mini" plain>下载</van-button>
+            </a>
+          </template>
         </div>
       </div>
     </div>
+
+    <!-- 模型文件打印配置(共用弹层) -->
+    <PrintConfigPopup v-model:show="showPrint" title="切片并打印"
+                      :base-payload="printPayload" @submitted="onSubmitted" />
+
+    <!-- G-code 推送打印 -->
+    <van-popup v-model:show="showPush" position="bottom" round style="padding:16px">
+      <h3 class="pb-title">推送打印</h3>
+      <div class="pb-muted" style="padding:0 0 6px">
+        {{ pushFile?.name }} · 已是 G-code,跳过切片直接上传
+      </div>
+      <van-field label="打印机" readonly>
+        <template #input>
+          <select v-model="pushPrinterId" class="pb-select">
+            <option :value="null" disabled>请选择</option>
+            <option v-for="p in pushPrinters" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+        </template>
+      </van-field>
+      <van-field v-if="pushSlots.length" label="CFS 料道" readonly>
+        <template #input>
+          <select v-model="pushCfs" class="pb-select">
+            <option value="">不换料</option>
+            <option v-for="s in pushSlots" :key="s.tnn" :value="s.tnn">{{ s.label }}</option>
+          </select>
+        </template>
+      </van-field>
+      <van-cell title="上传后自动开始打印">
+        <template #right-icon>
+          <van-switch v-model="pushAuto" size="22" />
+        </template>
+      </van-cell>
+      <van-button type="primary" block round style="margin-top:10px"
+                  :disabled="!pushPrinterId" @click="submitPush">开始打印</van-button>
+    </van-popup>
 
     <!-- 批量操作栏 -->
     <div v-if="batchMode && models.length" class="pb-batchbar">
@@ -191,3 +301,12 @@ onUnmounted(() => store.off(onLib))
     </van-dialog>
   </div>
 </template>
+
+<style scoped>
+.clickable { cursor: pointer; }
+.pb-listdot {
+  width: 14px; height: 14px; border-radius: 50%; flex: none;
+  border: 1.5px solid #fff; box-shadow: 0 0 0 1px #dcdee0;
+}
+.pb-select { width: 100%; border: 1px solid #ebedf0; border-radius: 6px; padding: 4px 8px; }
+</style>

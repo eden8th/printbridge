@@ -91,6 +91,56 @@ async def list_jobs(limit: int = 50, db: AsyncSession = Depends(get_db),
              "created_at": j.created_at.isoformat()} for j in res.scalars()]
 
 
+class PrintGcodeBody(BaseModel):
+    file_id: int
+    printer_id: int
+    cfs_tnn: str | None = None
+    auto_start: bool = True
+
+
+@router.post("/jobs/print-gcode")
+async def print_gcode(body: PrintGcodeBody, db: AsyncSession = Depends(get_db),
+                      user: User = Depends(current_user)):
+    """库内 G-code 直接推送打印(模型库切片产物/已有 G-code,跳过切片)。"""
+    f = await db.get(ModelFile, body.file_id)
+    if f is None or f.user_id != user.id or f.kind != "gcode":
+        raise HTTPException(404, "G-code 文件不存在")
+    printer = await db.get(Printer, body.printer_id)
+    if printer is None or printer.user_id != user.id:
+        raise HTTPException(404, "打印机不存在")
+    payload = {"print_gcode": True, "model_file_id": f.id,
+               "printer_id": body.printer_id, "auto_start": body.auto_start}
+    if body.cfs_tnn:
+        payload["cfs_tnn"] = body.cfs_tnn
+    job = await jsvc.create_job(
+        db, user.id, kind="print", printer_id=body.printer_id,
+        model_file_id=f.id, payload=payload)
+    queue.enqueue(job.id)
+    return {"job_id": job.id}
+
+
+@router.get("/jobs/stats")
+async def job_stats(db: AsyncSession = Depends(get_db),
+                    user: User = Depends(current_user)):
+    """任务使用统计(北极星:成功打印次数)。"""
+    res = await db.execute(select(Job).where(Job.user_id == user.id))
+    jobs = res.scalars().all()
+    total = len(jobs)
+    done = [j for j in jobs if j.state == "done"]
+    failed = [j for j in jobs if j.state == "failed"]
+    printed = [j for j in jobs if (j.result or {}).get("print_status") == "completed"]
+    slice_secs = [v for j in jobs
+                  if (v := (j.result or {}).get("stages", {}).get("slice")) is not None]
+    return {
+        "total": total,
+        "done": len(done),
+        "failed": len(failed),
+        "success_rate": round(len(done) / total * 100) if total else None,
+        "prints_completed": len(printed),
+        "avg_slice_sec": round(sum(slice_secs) / len(slice_secs), 1) if slice_secs else None,
+    }
+
+
 @router.get("/jobs/{job_id}")
 async def job_detail(job_id: int, db: AsyncSession = Depends(get_db),
                      user: User = Depends(current_user)):
