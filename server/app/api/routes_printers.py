@@ -158,19 +158,68 @@ async def delete_printer(printer_id: int, db: AsyncSession = Depends(get_db),
 @router.get("/{printer_id}/cfs")
 async def printer_cfs(printer_id: int, db: AsyncSession = Depends(get_db),
                       user: User = Depends(current_user)):
-    """CFS 料道状态(connected=True 时 raw 内含已识别的颜色/材质)。"""
+    """CFS 料道状态(connected=True 时 raw 内含已识别的颜色/材质)。
+
+    每个 slot 合并手工记录的库存克数(settings.inventory,RFID 不上报余量)。"""
     p = await db.get(Printer, printer_id)
     if p is None or p.user_id != user.id:
         raise HTTPException(404, "打印机不存在")
     adapter = build_adapter(p)
     try:
         result = await adapter.cfs_status()
-        return result or {"available": False, "connected": False, "raw": {}}
+        result = result or {"available": False, "connected": False, "raw": {}}
+        inv = (p.settings or {}).get("inventory") or {}
+        for box in result.get("boxes") or []:
+            for slot in box.get("slots") or []:
+                tnn = str(slot.get("slot") or "").upper()
+                if tnn in inv:
+                    slot["grams"] = inv[tnn]
+        return result
     except Exception as exc:  # noqa: BLE001
         return {"available": False, "connected": False, "error": str(exc)}
     finally:
         if hasattr(adapter, "aclose"):
             await adapter.aclose()
+
+
+class InventoryBody(BaseModel):
+    items: list[dict]   # [{tnn: "T1A", grams: 850}];grams 传 null 清除记录
+
+    @field_validator("items")
+    @classmethod
+    def _validate_items(cls, v):
+        import re
+        for item in v:
+            if not isinstance(item, dict) or not re.fullmatch(r"T\d[A-D]",
+                                                             str(item.get("tnn", ""))):
+                raise ValueError("料道标识应为 T1A~T4D")
+            grams = item.get("grams")
+            if grams is not None and (not isinstance(grams, (int, float)) or grams < 0):
+                raise ValueError("克数应为非负数字")
+        return v
+
+
+@router.put("/{printer_id}/inventory")
+async def set_inventory(printer_id: int, body: InventoryBody,
+                        db: AsyncSession = Depends(get_db),
+                        user: User = Depends(current_user)):
+    """手工记录各料道库存克数(CFS RFID 不上报余量,打印前据此校验够不够打)。"""
+    p = await db.get(Printer, printer_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(404, "打印机不存在")
+    settings = dict(p.settings or {})
+    inv = dict(settings.get("inventory") or {})
+    for item in body.items:
+        tnn = str(item["tnn"]).upper()
+        grams = item.get("grams")
+        if grams is None:
+            inv.pop(tnn, None)
+        else:
+            inv[tnn] = round(float(grams), 1)
+    settings["inventory"] = inv
+    p.settings = settings
+    await db.commit()
+    return {"ok": True, "inventory": inv}
 
 
 class SelectSlotBody(BaseModel):

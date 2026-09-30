@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { showFailToast } from 'vant'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { showFailToast, showSuccessToast } from 'vant'
 import { api } from '../api'
 
 /**
@@ -158,6 +158,44 @@ const colorHint = computed(() => {
   return '检测到 CFS 但未读到装料槽位;打印将使用打印机当前装料料道'
 })
 
+// 料道库存:手工记录克数,切片后据此校验够不够打
+const showInv = ref(false)
+const invDraft = reactive({})
+
+function slotLow(s) {
+  // 选中该槽且记录的库存低于 100g 时橙色提醒(具体不足在切片后精确校验)
+  return pickedSlot.value?.slot === s.slot && s.grams != null && s.grams < 100
+}
+
+function openInv() {
+  showInv.value = !showInv.value
+  if (showInv.value) {
+    for (const k of Object.keys(invDraft)) delete invDraft[k]
+    for (const b of cfsInfo.value?.boxes || [])
+      for (const s of b.slots || [])
+        if (s.color) invDraft[s.slot] = s.grams ?? ''
+  }
+}
+
+async function saveInv() {
+  const items = Object.entries(invDraft)
+    .filter(([, v]) => v !== '' && v !== null && v !== undefined)
+    .map(([tnn, v]) => ({ tnn, grams: Number(v) }))
+  try {
+    await api.put(`/api/printers/${printerId.value}/inventory`, { items })
+    showSuccessToast('库存已保存')
+    // 本地同步克数显示
+    for (const b of cfsInfo.value?.boxes || [])
+      for (const s of b.slots || []) {
+        const hit = items.find((x) => x.tnn === s.slot)
+        if (hit) s.grams = hit.grams
+      }
+    showInv.value = false
+  } catch (e) {
+    showFailToast(e.message)
+  }
+}
+
 function pickDefaults() {
   if (!bundle.value) return
   if (props.nozzleHint && nozzles.value.some((n) => n.nozzle === props.nozzleHint)) {
@@ -297,16 +335,19 @@ async function submit() {
     <van-field label="打印颜色" readonly>
       <template #input>
         <div class="pb-colors">
-          <!-- 有 CFS:只显示真实料道(带槽位号与材质角标);无 CFS:显示常见耗材预设色 -->
+          <!-- 有 CFS:只显示真实料道(带槽位号/材质/库存);无 CFS:显示常见耗材预设色 -->
           <template v-if="hasCfs">
             <span v-for="s in cfsSlots" :key="s.box + s.slot" class="pb-slot"
-                  :title="`CFS 料道${s.box}${s.slot} · ${s.name || s.material}`"
+                  :title="`CFS 料道${s.box}${s.slot} · ${s.name || s.material}${s.grams != null ? ' · 库存' + s.grams + 'g' : ''}`"
                   @click="pickCfsSlot(s)">
               <span class="pb-dot" :class="{ active: pickedSlot && pickedSlot.box === s.box && pickedSlot.slot === s.slot }"
                     :style="{ background: s.color }">
                 <span class="pb-slotnum">{{ s.box.replace('T', '') }}{{ 'ABCD'[s.index - 1] || s.index }}</span>
               </span>
               <span class="pb-slotmat">{{ s.material || '已装料' }}</span>
+              <span class="pb-slotmat" :style="slotLow(s) ? 'color:#ff9766' : ''">
+                {{ s.grams != null ? s.grams + 'g' : '记库存' }}
+              </span>
             </span>
           </template>
           <template v-else>
@@ -319,6 +360,25 @@ async function submit() {
     </van-field>
     <div class="pb-muted" style="padding:0 16px 4px">
       {{ selectedColorName }} · {{ colorHint }}
+    </div>
+    <div v-if="hasCfs" style="text-align:right;padding:0 16px 4px">
+      <span class="pb-invlink" @click="openInv">
+        {{ showInv ? '收起库存' : '记录料道库存' }}
+      </span>
+    </div>
+    <!-- 库存编辑:CFS RFID 不上报余量,手工记录供打印前校验 -->
+    <div v-if="showInv && hasCfs" style="padding:0 16px 8px">
+      <div v-for="s in cfsSlots" :key="'inv' + s.box + s.slot" class="pb-row"
+           style="margin-bottom:6px;gap:8px">
+        <span class="pb-dot" style="width:14px;height:14px;cursor:default"
+              :style="{ background: s.color }"></span>
+        <span class="pb-grow" style="font-size:13px">
+          {{ s.box }}{{ s.slot }} · {{ s.material || '已装料' }}
+        </span>
+        <input v-model="invDraft[s.slot]" type="number" min="0" placeholder="克数"
+               class="pb-invinput" /> <span class="pb-muted" style="font-size:12px">g</span>
+      </div>
+      <van-button size="mini" plain type="primary" @click="saveInv">保存库存</van-button>
     </div>
     <van-field label="工艺层厚" readonly>
       <template #input>
@@ -359,6 +419,11 @@ async function submit() {
   gap: 2px; cursor: pointer;
 }
 .pb-slotmat { font-size: 9px; color: #969799; line-height: 1; }
+.pb-invlink { font-size: 12px; color: var(--pb-primary, #1989fa); cursor: pointer; }
+.pb-invinput {
+  width: 64px; border: 1px solid #ebedf0; border-radius: 6px;
+  padding: 3px 6px; font-size: 13px; text-align: right;
+}
 .pb-slotnum {
   font-size: 10px; color: #fff; text-shadow: 0 0 2px #000; font-weight: 700;
 }

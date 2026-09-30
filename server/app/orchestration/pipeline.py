@@ -220,6 +220,14 @@ async def run_pipeline(db: AsyncSession, job) -> dict:
     printer = await db.get(Printer, job.printer_id)
     if printer is None or printer.user_id != job.user_id:
         raise PipelineError("打印机不存在")
+    # 库存校验:选定料道记录了库存且低于本件克重时提前拦截(切片后即知克重)
+    grams = result.filament_grams if result else float((file_row.meta or {}).get("filament_grams") or 0)
+    tnn = str(payload.get("cfs_tnn") or "").strip().upper()
+    inv = (printer.settings or {}).get("inventory") or {}
+    if tnn and grams and tnn in inv and grams > float(inv[tnn]):
+        raise PipelineError(
+            f"料道 {tnn} 库存不足:本件约需 {grams:.0f}g,仅记录 {float(inv[tnn]):.0f}g。"
+            "请更换料道/补充耗材,或在配置弹层修正库存后重试")
     adapter = build_adapter(printer)
     remote = ""
     try:
