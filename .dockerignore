@@ -1,13 +1,13 @@
 # 构建上下文只保留镜像需要的内容(构建上下文为仓库根目录)
+#
+# 注意:web/src、web/index.html、web/vite.config.js 必须保留——前端在镜像内
+# 用 node 阶段构建(见 server/Dockerfile)。只排除本地构建产物。
 .git
 data
 docs
 tools
 web/node_modules
-web/public
-web/src
-web/*.js
-web/*.html
+web/dist
 web/README.md
 server/data
 server/tests

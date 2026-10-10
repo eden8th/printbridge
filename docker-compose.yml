@@ -1,6 +1,20 @@
 # PrintBridge 自托管部署(NAS / 常开主机)
-# 用法:docker compose up -d --build  →  浏览器打开 http://<主机IP>:8002
-# 端口 8000 已被服务器上其他服务占用,宿主机侧映射到 8002
+#
+# 首次使用请先准备构建依赖(仓库不收录第三方二进制与前端产物):
+#     python tools/prepare.py
+#
+# 然后:
+#     docker compose up -d --build
+# 浏览器打开 http://<主机IP>:8002
+#
+# 端口 8000 已被部分服务器上的其他服务占用,宿主机侧映射到 8002;
+# 需要改端口改下面的 ports 即可。
+#
+# name 显式钉住 compose 项目名:默认取目录名,而"项目名相同"是全局作用域——
+# 在任何另一个同名目录下执行 docker compose down -v,会连带删掉本项目的
+# 容器与数据卷,包括本目录这一套。钉死名字后,克隆到别处测试也不会误伤。
+name: printbridge
+
 services:
   server:
     build:
@@ -14,10 +28,10 @@ services:
       - "host.docker.internal:host-gateway"   # 访问 camera 容器(1984)
     environment:
       # 生产用 PostgreSQL;数据卷见 volumes 段
-      PB_DATABASE_URL: postgresql+asyncpg://printbridge:printbridge@db:5432/printbridge
-      PB_ROLE: server
-      # 容器内看不到宿主机真实网段,局域网扫描需显式指定
-      PB_SCAN_CIDRS: 192.168.8.0/24
+      PB_DATABASE_URL: postgresql+asyncpg://printbridge:${PB_DB_PASSWORD:-printbridge}@db:5432/printbridge
+      # 容器内只看到 Docker 网桥,扫描不到真实局域网,需显式指定打印机所在网段。
+      # 留空则只能手动填 IP。查本机网段:ip route | grep -o '192\.168\.[0-9]*\.0/24' | head -1
+      PB_SCAN_CIDRS: ${PB_SCAN_CIDRS:-}
     volumes:
       - printbridge-data:/app/data
     depends_on:
@@ -42,7 +56,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: printbridge
-      POSTGRES_PASSWORD: printbridge
+      POSTGRES_PASSWORD: ${PB_DB_PASSWORD:-printbridge}
       POSTGRES_DB: printbridge
     volumes:
       - printbridge-db:/var/lib/postgresql/data
@@ -51,14 +65,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
-  # P1 预留:worker 模式启用;P0 队列在进程内,不依赖 redis,暂不部署
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: printbridge-redis
-  #   restart: unless-stopped
-  #   volumes:
-  #     - printbridge-redis:/data
 
 volumes:
   printbridge-data:
