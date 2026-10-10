@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { api } from './api'
 
 /** 全局实时状态:单一 WS 连接,任务/打印机事件分发到页面。 */
 export const store = reactive({

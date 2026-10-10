@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { showSuccessToast } from 'vant'
+import { showConfirmDialog, showSuccessToast } from 'vant'
 import { api } from '../api'
 import { useIsMobile } from '../composables/useDevice'
 

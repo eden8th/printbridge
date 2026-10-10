@@ -138,7 +138,7 @@ def _find_first(obj, keys: tuple[str, ...], depth: int = 0):
 
 
 def normalize_telemetry(data: dict) -> Telemetry:
-    """字段名以 K2 Pro 实机帧为准(2026-09 对 192.168.8.220 实测校准),
+    """字段名以 K2 Pro 实机帧为准(2026-09 实测校准),
     同时保留 K1 系列社区已知的旧字段名兜底。"""
     state_raw = data.get("state") if isinstance(data.get("state"), (int, float)) else \
         str(_find_first(data, ("status", "machineStatus")) or "").lower()

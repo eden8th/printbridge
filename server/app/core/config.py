@@ -16,19 +16,15 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # 角色预留:server|worker 角色,worker 模式处理异步任务
-    role: str = "server"
-    relay_url: str = ""
-
-    # 远程文件下载单文件上限(防滥用/防炸弹),默认 2GB
-    max_download_bytes: int = 2 * 1024**3
-
     # 局域网发现:额外扫描的网段(逗号分隔 CIDR)。容器部署时容器内只能看到
     # Docker 网桥网段,需在 compose 中显式注入,如 PB_SCAN_CIDRS=192.168.8.0/24
     scan_cidrs: str = ""
 
     # 摄像头 go2rtc sidecar API(camera 容器,host 网络)
     camera_api: str = "http://host.docker.internal:1984"
+
+    # 单次切片子进程超时(秒),防 Orca 卡死拖死整个队列
+    slice_timeout: int = 900
 
 
 settings = Settings()

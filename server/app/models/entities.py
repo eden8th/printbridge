@@ -1,12 +1,11 @@
-"""数据模型。所有业务表带 user_id(亦是文件存储路径的一级目录)。
-
-usage_ledger(用量账本)P0 仅建表占位,计量逻辑预留。
+"""数据模型。自托管单用户形态:全程只有 users 表里的一个 local 用户,
+其余业务表保留 user_id 便于将来扩展,但不存在跨用户隔离逻辑。
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -21,7 +20,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True)
-    is_local: Mapped[bool] = mapped_column(default=True)  # P0 本地单用户
+    is_local: Mapped[bool] = mapped_column(default=True)  # 恒为本地单用户
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     models: Mapped[list["ModelRecord"]] = relationship(back_populates="user")
@@ -64,7 +63,7 @@ class ModelFile(Base):
 
 
 class Printer(Base):
-    """一台已注册的打印机。凭据 P0 明文存本地库,后续可改 KMS 加密。"""
+    """一台已注册的打印机。凭据明文存本地库(自托管单机,库文件不外传)。"""
     __tablename__ = "printers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -104,17 +103,6 @@ class Job(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
-
-
-class UsageLedger(Base):
-    """用量账本(按次计量预留),P0 只建表。"""
-    __tablename__ = "usage_ledger"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    delta: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[str] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AppSetting(Base):

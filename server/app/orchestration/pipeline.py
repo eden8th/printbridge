@@ -61,7 +61,7 @@ async def _wait_nozzle_cool(db: AsyncSession, job, adapter, jsvc,
 async def _download_stage(db: AsyncSession, job, payload: dict) -> ModelFile:
     """从模型源拉取指定实例并入库,返回 ModelFile。"""
     await jsvc.set_state(db, job, "downloading", "从模型源下载", 0.05)
-    source = await build_source(str(payload["source"]), db)
+    source = await build_source(str(payload["source"]), db, job.user_id)
     try:
         design = await source.design(str(payload["design_id"]))
         inst = next((i for i in design.instances

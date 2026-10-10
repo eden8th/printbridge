@@ -1,6 +1,5 @@
 from app.models.entities import (
     AppSetting,
-    UsageLedger,
     Job,
     ModelFile,
     ModelRecord,
@@ -8,4 +7,6 @@ from app.models.entities import (
     User,
 )
 
-__all__ = ["AppSetting", "UsageLedger", "Job", "ModelFile", "ModelRecord", "Printer", "User"]
+__all__ = [
+    "AppSetting", "Job", "ModelFile", "ModelRecord", "Printer", "User",
+]

@@ -285,6 +285,35 @@ class MoonrakerAdapter(PrinterAdapter):
     async def run_gcode(self, script: str) -> None:
         await self._command("/printer/gcode/script", {"script": script})
 
+    async def camera_frame(self) -> bytes | None:
+        """Moonraker webcam 快照(自动发现注册配置,退回常见路径)。"""
+        candidates: list[str] = []
+        try:
+            r = await self._client.get("/server/webcams/list")
+            for w in r.json().get("result", {}).get("webcams") or []:
+                url = w.get("snapshot_url") or w.get("stream_url")
+                if not url:
+                    continue
+                if url.startswith("/"):
+                    loc = str(w.get("location") or "").strip("/")
+                    candidates.append(
+                        f"http://{self.host}{('/' + loc) if loc else ''}{url}")
+                else:
+                    candidates.append(url)
+        except (httpx.HTTPError, ValueError):
+            pass
+        candidates += [f"http://{self.host}/webcam/?action=snapshot",
+                       f"http://{self.host}:8080/?action=snapshot"]
+        async with httpx.AsyncClient(timeout=6) as c:
+            for url in candidates:
+                try:
+                    r = await c.get(url)
+                except httpx.HTTPError:
+                    continue
+                if r.status_code == 200 and r.content.startswith(b"\xff\xd8"):
+                    return r.content
+        return None
+
     async def light_state(self) -> bool | None:
         """腔体灯状态(K2:output_pin LED);不可查返回 None。"""
         try:

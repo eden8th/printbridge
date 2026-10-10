@@ -1,5 +1,18 @@
 # 构建上下文为仓库根目录:
 #   docker compose build --pull   (compose 中已配置 context: .)
+
+# ---- 前端构建 ----------------------------------------------------------
+# 放在镜像里构建,是为了让 Docker 用户不必在本机装 Node.js。
+# 只依赖 package.json/package-lock.json,源码改动才失效这一层。
+FROM node:22-alpine AS web
+
+WORKDIR /app
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
+# ---- 运行时 ------------------------------------------------------------
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -16,10 +29,10 @@ COPY vendor/go2rtc/go2rtc /usr/local/bin/go2rtc
 RUN chmod +x /usr/local/bin/go2rtc
 # go2rtc 配置(camera 容器以 host 网络运行,引用 /app/go2rtc.yaml)
 COPY vendor/go2rtc/go2rtc.yaml /app/go2rtc.yaml
-# 前端构建产物随镜像分发
+# 前端构建产物由上面的 web 阶段产出
 # 注意:容器内 main.py 位于 /app/app/main.py,其 parents[2] 是 /(而非 WORKDIR /app),
 # 故前端目录须位于 /web/dist 才能被 SPA 回退路由找到
-COPY web/dist /web/dist
+COPY --from=web /app/dist /web/dist
 
 # 切片引擎:OrcaSlicer Linux V2.4.2(与 orca_cli.py 实测的 CLI 调用形态同版本)。
 # AppImage 构建于 Ubuntu 24.04,Debian 13 glibc 向后兼容;

@@ -1,6 +1,6 @@
-"""PrintBridge 服务端入口。
+"""PrintBridge 服务端入口(自托管单机版)。
 
-启动流程:建表 → 确保本地用户 → 启动任务队列 worker → 恢复打印机遥测循环。
+启动流程:建表 → 确保本地用户 → 恢复打印机遥测循环 → 启动任务队列 worker。
 """
 from __future__ import annotations
 
@@ -9,11 +9,9 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.api import api_router
-from app.core.config import settings
 from app.core.db import SessionLocal, init_db
 from app.models import Printer
 from app.orchestration.queue import queue
@@ -27,10 +25,9 @@ async def lifespan(app: FastAPI):
     async with SessionLocal() as db:
         await get_local_user(db)
         res = await db.execute(select(Printer).where(Printer.is_enabled.is_(True)))
-        printers = res.scalars().all()
+        for p in res.scalars().all():   # 重启后恢复遥测循环
+            manager.ensure_loop(p)
     queue.start()
-    for p in printers:      # 重启后恢复遥测循环
-        manager.ensure_loop(p)
     yield
     await manager.shutdown()
     await queue.stop()
@@ -40,8 +37,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PrintBridge", version="0.1.0", lifespan=lifespan)
 
+# CORS:局域网直连,保持宽松(前端与服务同源,此处的设置只影响跨源调用)
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"], allow_headers=["*"],
 )
 
 app.include_router(api_router)
@@ -49,7 +49,7 @@ app.include_router(api_router)
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "role": settings.role}
+    return {"ok": True}
 
 
 # 生产模式:直接挂载前端构建产物(开发时前端走 Vite dev server)

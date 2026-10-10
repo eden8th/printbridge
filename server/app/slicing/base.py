@@ -1,10 +1,10 @@
-"""切片层公共类型。实现方遵循同一 resolve+slice 契约。"""
+"""切片层公共类型。"""
 from dataclasses import dataclass
 
 
 @dataclass
 class SliceEngineInfo:
-    kind: str          # local / cloud(P1)
+    kind: str          # local
     name: str
     available: bool
     detail: str = ""

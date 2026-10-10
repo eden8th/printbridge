@@ -57,4 +57,4 @@ async def _emit(job: Job) -> None:
         "error": job.error, "model_file_id": job.model_file_id,
         "printer_id": job.printer_id, "parent_id": job.parent_id,
         "result": job.result,
-    })
+    }, user_id=job.user_id)

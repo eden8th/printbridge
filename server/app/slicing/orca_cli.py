@@ -91,6 +91,8 @@ def _run_sync(req: SliceRequest, exe: str) -> tuple[int, list[str]]:
             creationflags=flags)
     except FileNotFoundError:
         return -1, [f"切片器不可执行:{exe}"]
+    from app.core.config import settings
+    timed_out = False
     try:
         assert proc.stdout is not None
         for raw in proc.stdout:
@@ -100,12 +102,20 @@ def _run_sync(req: SliceRequest, exe: str) -> tuple[int, list[str]]:
                 tail = tail[-400:]
             if logf:
                 logf.write(raw)
+        code = proc.wait(timeout=settings.slice_timeout)
+    except subprocess.TimeoutExpired:
+        # 防呆:切片子进程挂死时按时限回收,而非无限占用
+        timed_out = True
+        proc.kill()
         code = proc.wait()
+        tail.append(f"[timeout] 切片超过 {settings.slice_timeout}s,已强制终止")
     finally:
         if logf:
             logf.close()
         if proc.poll() is None:
             proc.kill()
+    if timed_out:
+        return -9, tail
     return code, tail
 
 

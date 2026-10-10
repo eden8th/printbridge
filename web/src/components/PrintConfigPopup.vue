@@ -294,7 +294,7 @@ async function submit() {
       auto_start: autoStart.value,
     })
     emit('update:show', false)
-    emit('submitted', res.job_id)
+    emit('submitted', res)   // {job_id}
   } catch (e) {
     showFailToast(e.message)
   } finally {

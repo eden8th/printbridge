@@ -63,11 +63,13 @@ class PrinterManager:
                 self.stop(printer_id)
                 return
             adapter = build_adapter(printer)
+            owner_id = printer.user_id
             try:
                 async for tel in adapter.stream():
                     self._latest[printer_id] = tel
                     await bus.publish("printer_telemetry",
-                                      {"printer_id": printer_id, **tel.to_dict()})
+                                      {"printer_id": printer_id, **tel.to_dict()},
+                                      user_id=owner_id)
                     if tel.state == "offline":
                         break
             except asyncio.CancelledError:
@@ -76,7 +78,7 @@ class PrinterManager:
                 self._latest[printer_id] = Telemetry(state="offline")
                 await bus.publish("printer_telemetry",
                                   {"printer_id": printer_id,
-                                   "state": "offline"})
+                                   "state": "offline"}, user_id=owner_id)
             finally:
                 await adapter.aclose() if hasattr(adapter, "aclose") else None
             await asyncio.sleep(3.0)

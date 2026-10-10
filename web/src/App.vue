@@ -1,22 +1,23 @@
 <script setup>
-import { onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { store } from './store'
 import { useIsMobile } from './composables/useDevice'
 
-const route = useRoute()
 const router = useRouter()
 const isMobile = useIsMobile()
 
-onMounted(() => store.connect())
+onMounted(() => {
+  store.connect()
+})
 
-const tabs = [
+const tabs = computed(() => [
   { path: '/search', label: '发现', icon: 'search' },
   { path: '/library', label: '模型库', icon: 'apps-o' },
   { path: '/printers', label: '打印机', icon: 'printer' },
   { path: '/jobs', label: '任务', icon: 'orders-o' },
   { path: '/settings', label: '设置', icon: 'setting-o' },
-]
+])
 </script>
 
 <template>

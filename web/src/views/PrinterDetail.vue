@@ -102,8 +102,9 @@ async function test() {
 
 // CFS 料道(含手工库存)
 async function loadCfs() {
-  try { cfsInfo.value = await api.get(`/api/printers/${id.value}/cfs`) }
-  catch { cfsInfo.value = null }
+  try {
+    cfsInfo.value = await api.get(`/api/printers/${id.value}/cfs`)
+  } catch { cfsInfo.value = null }
 }
 const cfsSlots = computed(() => {
   const out = []
@@ -126,16 +127,16 @@ onMounted(async () => {
   loadCfs()
   loadLight()
   refreshCam()
-  camTimer = setInterval(() => { camTs.value = Date.now() }, 5000)
+  camTimer = setInterval(refreshCam, 5000)
 })
-onUnmounted(() => clearInterval(camTimer))
+onUnmounted(() => { clearInterval(camTimer) })
 </script>
 
 <template>
   <div class="pb-page" v-if="p">
     <van-nav-bar :title="p.name" left-arrow @click-left="router.back()" />
 
-    <!-- 主视觉:摄像头画面 + 悬浮状态与灯光控制 -->
+    <!-- 主视觉:摄像头画面 -->
     <div class="pd-hero">
       <img v-if="!camFail" :src="camUrl" @error="camFail = true" />
       <div v-else class="pd-hero-ph">

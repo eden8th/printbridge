@@ -23,6 +23,15 @@ const form = ref({
   settings: {},
 })
 
+async function load() {
+  printers.value = await api.get('/api/printers')
+  adapters.value = await api.get('/api/printers/adapters')
+  try {
+    const pr = await api.get('/api/profiles')
+    models.value = pr.map((b) => ({ key: b.key, name: b.name }))
+  } catch { models.value = [] }
+}
+
 // 局域网自动发现
 const scanning = ref(false)
 const scanHint = ref('')
@@ -54,15 +63,6 @@ function applyCandidate(c) {
   if (c.detail?.model) form.value.settings.model = c.detail.model
   else if (!form.value.settings.model && models.value.length)
     form.value.settings.model = models.value[0].key
-}
-
-async function load() {
-  printers.value = await api.get('/api/printers')
-  adapters.value = await api.get('/api/printers/adapters')
-  try {
-    const pr = await api.get('/api/profiles')
-    models.value = pr.map((b) => ({ key: b.key, name: b.name }))
-  } catch { models.value = [] }
 }
 
 function openAdd() {
@@ -236,6 +236,7 @@ onUnmounted(() => store.off(onTel))
         创想 K 系列默认端口 9999;Klipper/Moonraker 默认 7125。连不上时先在电脑上跑探测工具。
       </div>
     </van-dialog>
+
   </div>
 </template>
 

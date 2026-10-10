@@ -87,6 +87,10 @@ class PrinterAdapter(ABC):
         """发送原生 G-code;不支持原生指令的实现可忽略。"""
         return None
 
+    async def camera_frame(self) -> bytes | None:
+        """抓一帧 JPEG;不支持的实现返回 None。"""
+        return None
+
     async def light_state(self) -> bool | None:
         """腔体灯状态;不可查的实现返回 None。"""
         return None

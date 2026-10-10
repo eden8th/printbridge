@@ -77,7 +77,7 @@ async def _watch(job_id: int, printer_id: int, remote_file: str,
                             "id": job_id, "kind": j.kind, "state": j.state,
                             "detail": j.detail, "progress": j.progress,
                             "error": j.error, "result": j.result,
-                        })
+                        }, user_id=j.user_id)
                 return
             except asyncio.CancelledError:
                 raise
