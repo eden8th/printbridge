@@ -71,8 +71,8 @@ async function openPrint() {
   showPrint.value = true
 }
 
-function onSubmitted(jobId) {
-  showSuccessToast(`任务 #${jobId} 已提交`)
+function onSubmitted(res) {
+  showSuccessToast(`任务 #${res.job_id} 已提交`)
   router.push('/jobs')
 }
 

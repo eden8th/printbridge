@@ -40,14 +40,51 @@ async def parse_link(body: ParseLinkBody,
     result = parse_share_link(body.url)
     if result.get("unsupported"):
         raise HTTPException(400, result["reason"])
-    # 校验设计存在并带回标题(顺便确认 token/网络可用性)
-    adapter = await build_adapter(result["source"], db)
+    # 区域跟随链接来源(.com=国际站 / com.cn=国内站,ID 空间互不相通),
+    # 并持久化为该用户的拓竹源区域,保证后续搜索/详情/下载一致
+    region = result.pop("region", None)
+    from app.services.settings_service import get_makerworld_cfg, put_makerworld_cfg
+    cfg = await get_makerworld_cfg(db)
+    adapter = await build_adapter(result["source"], db,
+                                  region_override=region)
     try:
         d = await adapter.design(result["design_id"])
+        global_instances = d.instances
+        # 国际站链接:若国内站有镜像条目,改用镜像的那一份,标题/描述/实例名都是中文
+        localized = False
+        if region == "com" and hasattr(adapter, "resolve_cn_twin"):
+            twin_id = await adapter.resolve_cn_twin(d)
+            if twin_id and twin_id != d.id:
+                await adapter.aclose()
+                region = "cn"
+                adapter = await build_adapter(result["source"], db,
+                                              region_override=region)
+                d = await adapter.design(twin_id)
+                # 链接里的 #profileId-xxx 是国际站实例 ID,按实例顺序映射到镜像条目
+                pid = result.get("profile_id")
+                if pid:
+                    idx = next((i for i, inst in enumerate(global_instances)
+                                if inst.instance_id == str(pid)), None)
+                    mapped = (d.instances[idx].instance_id
+                              if idx is not None and idx < len(d.instances) else None)
+                    if mapped:
+                        result["profile_id"] = mapped
+                    else:
+                        result.pop("profile_id", None)
+                result["design_id"] = d.id
+                localized = True
         result["title"] = d.title
         result["cover"] = d.cover
+        result["source_url"] = d.source_url
     finally:
         await adapter.aclose()
+    result["region_switched"] = bool(region and region != cfg.get("region", "cn"))
+    if region and region != cfg.get("region", "cn"):
+        await put_makerworld_cfg(db, {**cfg, "region": region})
+    result["region"] = region  # 实际生效的区域(可能被镜像条目改写为 cn)
+    result["localized"] = localized
+    # 国际站链接但国内站没有镜像条目:只能显示原文,如实告知前端而不是静默
+    result["overseas_only"] = bool(region == "com" and not localized)
     return result
 
 

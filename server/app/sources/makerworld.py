@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator
+from urllib.parse import urlparse
 
 import httpx
 
@@ -36,6 +38,17 @@ _ORDER_BY = {"score": "score", "downloadCount": "downloadCount",
              "likeCount": "likeCount", "newUploads": "newUploads", "hotScore": "hotScore"}
 
 
+def _cover_key(url: str) -> str:
+    """封面指纹:镜像条目沿用原始封面的文件名,是判据「同一模型」最可靠的信号。"""
+    path = (urlparse(url or "").path or "").rsplit("/", 2)
+    return "/".join(path[-2:]) if len(path) >= 2 else (url or "")
+
+
+def _norm_title(title: str) -> str:
+    """标题归一化:去掉标点/空白/大小写差异,用于跨语言同标题比对。"""
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", (title or "").lower())
+
+
 class MakerWorldAdapter(SourceAdapter):
     key = "makerworld"
     name = "MakerWorld(拓竹)"
@@ -43,6 +56,7 @@ class MakerWorldAdapter(SourceAdapter):
     def __init__(self, token: str = "", region: str = "cn") -> None:
         # region: cn=国内(默认,中文数据) / com=国际
         host = "api.bambulab.cn" if region == "cn" else "api.bambulab.com"
+        self.region = region
         self._base = f"https://{host}"
         self._token = (token or "").strip()
         self._client = httpx.AsyncClient(
@@ -136,7 +150,9 @@ class MakerWorldAdapter(SourceAdapter):
             cover=str(d.get("coverUrl") or ""),
             author=str(creator.get("nickName") or creator.get("name") or ""),
             summary_html=str(d.get("summary") or ""),
-            source_url=f"https://makerworld.com/zh/models/{d['id']}",
+            source_url=(f"https://makerworld.com.cn/zh/models/{d['id']}"
+                        if self.region == "cn"
+                        else f"https://makerworld.com/zh/models/{d['id']}"),
             instances=instances,
         )
         # instances 为空时兜底拉独立实例接口
@@ -156,6 +172,47 @@ class MakerWorldAdapter(SourceAdapter):
             except SourceError:
                 pass
         return detail
+
+    # ---- 跨区域镜像 ----------------------------------------------------
+    async def resolve_cn_twin(self, design: DesignDetail) -> str | None:
+        """把国际站设计映射到国内站的镜像条目 ID(有中文标题/描述)。
+
+        MakerWorld 会把作者发布到全球站的作品同步一份到国内站,但分配全新 ID,
+        两站 ID 空间互不相通,同一数字在两端是完全不同的模型。用户分享国际站
+        链接时若不做这层映射,拿到的就是英文标题、英文描述和英文实例名。
+
+        识别同一模型的两个信号(按可靠性排序):
+          1. 封面文件名一致 —— 镜像条目直接复用原始封面资源
+          2. 标题归一化后一致,且作者同名 —— 封面被作者换过时的兜底
+        本就不是国际站、或国内站没有镜像时返回 None。
+        """
+        if self.region != "com":
+            return None
+        cn = MakerWorldAdapter(token=self._token, region="cn")
+        try:
+            # 主关键词用完整标题;命中不了再退回标题主干(去掉 "—" 后缀)
+            head = re.split(r"[—\-–|]", design.title)[0].strip()
+            for keyword in (design.title, head):
+                if not keyword:
+                    continue
+                _, items = await cn.search(keyword, page_size=10)
+                if not items:
+                    continue
+                key = _cover_key(design.cover)
+                covers = [_cover_key(i.cover) for i in items]
+                if key and key in covers:
+                    return items[covers.index(key)].id
+                target = _norm_title(design.title)
+                for it in items:
+                    if _norm_title(it.title) == target and (
+                            not design.author or not it.author
+                            or _norm_title(it.author) == _norm_title(design.author)):
+                        return it.id
+        except (SourceError, httpx.HTTPError):
+            return None
+        finally:
+            await cn.aclose()
+        return None
 
     # ---- 下载 ----------------------------------------------------------
     async def resolve_download(

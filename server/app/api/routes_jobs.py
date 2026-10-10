@@ -13,6 +13,7 @@ from app.models import Job, ModelFile, Printer, User
 from app.orchestration import jobs_service as jsvc
 from app.orchestration.queue import queue
 from app.slicing import detect_slicer
+from app.core.config import settings
 from app.services.settings_service import get_setting, put_setting
 
 router = APIRouter(prefix="/api", tags=["jobs"])
@@ -46,8 +47,8 @@ async def oneclick(body: OneClickBody, db: AsyncSession = Depends(get_db),
     if printer is None or printer.user_id != user.id:
         raise HTTPException(404, "打印机不存在")
     # 切片参数记忆:按打印机记住本次配置,下次打开配置弹层自动填充
-    settings = dict(printer.settings or {})
-    settings["last_print"] = {
+    settings_d = dict(printer.settings or {})
+    settings_d["last_print"] = {
         "bundle": body.bundle,
         "machine_id": body.machine_id,
         "filament_ids": body.filament_ids,
@@ -55,12 +56,12 @@ async def oneclick(body: OneClickBody, db: AsyncSession = Depends(get_db),
         "process_id": body.process_id,
         "cfs_tnn": body.cfs_tnn,
     }
-    printer.settings = settings
+    printer.settings = settings_d
     await db.commit()
+    payload = body.model_dump(exclude_none=True)
     job = await jsvc.create_job(
         db, user.id, kind="pipeline", printer_id=body.printer_id,
-        model_file_id=body.model_file_id,
-        payload=body.model_dump(exclude_none=True))
+        model_file_id=body.model_file_id, payload=payload)
     queue.enqueue(job.id)
     return {"job_id": job.id}
 
@@ -381,11 +382,21 @@ async def profile_options(key: str, nozzle: str = "0.4"):
 
 
 # ---- 设置 --------------------------------------------------------------
+async def _mw_read(db: AsyncSession) -> dict:
+    from app.services.settings_service import get_makerworld_cfg
+    return await get_makerworld_cfg(db)
+
+
+async def _mw_write(db: AsyncSession, value: dict) -> None:
+    from app.services.settings_service import put_makerworld_cfg
+    return await put_makerworld_cfg(db, value)
+
+
 @router.get("/settings")
 async def read_settings(db: AsyncSession = Depends(get_db),
                         user: User = Depends(current_user)):
     cfg = await get_setting(db, "app")
-    mw = await get_setting(db, "makerworld")
+    mw = await _mw_read(db)
     # token 只回传是否有值,不回传内容
     return {"app": cfg,
             "makerworld": {**mw, "token": "已配置" if mw.get("token") else ""}}
@@ -403,11 +414,11 @@ async def write_settings(body: SettingsBody,
     if body.app:
         await put_setting(db, "app", body.app)
     if body.makerworld:
-        cur = await get_setting(db, "makerworld")
+        cur = await _mw_read(db)
         new = {**cur, **body.makerworld}
         if body.makerworld.get("token") == "已配置":  # 前端原样回传 = 不修改
             new["token"] = cur.get("token", "")
-        await put_setting(db, "makerworld", new)
+        await _mw_write(db, new)
     return {"ok": True}
 
 

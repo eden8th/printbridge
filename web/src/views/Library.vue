@@ -79,8 +79,8 @@ async function submitPush() {
   }
 }
 
-function onSubmitted(jobId) {
-  showSuccessToast(`任务 #${jobId} 已提交`)
+function onSubmitted(res) {
+  showSuccessToast(`任务 #${res.job_id} 已提交`)
   router.push('/jobs')
 }
 
@@ -91,6 +91,13 @@ async function importFromLink() {
     const r = await api.post('/api/sources/parse-link', { url })
     showLinkImport.value = false
     shareUrl.value = ''
+    if (r.region_switched) {
+      showSuccessToast(`已按链接切换到拓竹${r.region === 'com' ? '国际站' : '国内站'}源`)
+    } else if (r.localized) {
+      showSuccessToast('已匹配到该模型在国内站的条目,标题与描述已中文化')
+    } else if (r.overseas_only) {
+      showSuccessToast('该模型未同步到国内站,按国际站原文展示')
+    }
     // 跳转模型详情页(可选版本后一键打印/入库)
     router.push(`/model/${r.source}/${r.design_id}`)
   } catch (e) {

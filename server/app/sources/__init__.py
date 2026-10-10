@@ -28,6 +28,9 @@ def parse_share_link(url: str) -> dict:
         pm = _MW_PROFILE_RE.search(url)
         if pm:
             out["profile_id"] = pm.group(1)
+        # 关键:国际站(.com)与国内站(com.cn)是两套独立 ID 空间,
+        # 同一 ID 在两端对应完全不同的模型,必须按链接来源选择 API 区域
+        out["region"] = "cn" if re.search(r"makerworld\.com\.cn", url, re.I) else "com"
         return out
     if _CR_URL_RE.search(url):
         return {"unsupported": True,
@@ -47,12 +50,15 @@ def get_adapter_class(key: str) -> type[SourceAdapter]:
         raise SourceError(f"未知模型源:{key}") from exc
 
 
-async def build_adapter(key: str, db) -> SourceAdapter:
-    """按 key 构造适配器,自动注入该源的用户凭证。"""
+async def build_adapter(key: str, db,
+                        region_override: str | None = None) -> SourceAdapter:
+    """按 key 构造适配器,自动注入该源的全局凭证。
+
+    region_override:链接解析出的来源区域,优先于用户设置。"""
     cls = get_adapter_class(key)
     kwargs: dict = {}
     if key == "makerworld":
         cfg = await get_setting(db, "makerworld")
         kwargs["token"] = str(cfg.get("token") or "")
-        kwargs["region"] = str(cfg.get("region") or "cn")
+        kwargs["region"] = region_override or str(cfg.get("region") or "cn")
     return cls(**kwargs)
