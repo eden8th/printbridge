@@ -24,9 +24,13 @@ const tabs = computed(() => [
   <header v-if="!isMobile" class="pb-topnav">
     <div class="pb-topnav-inner">
       <div class="pb-brand" @click="router.push('/search')">
-        <span class="pb-brand-icon">🖨️</span> PrintBridge
-        <span class="pb-brand-sub">跨品牌一键打印</span>
+        <div class="pb-brand-logo">🖨️</div>
+        <div>
+          <div class="pb-brand-text">PrintBridge</div>
+          <div class="pb-brand-sub">3D 跨品牌一键打印平台</div>
+        </div>
       </div>
+
       <nav class="pb-navlinks">
         <router-link v-for="t in tabs" :key="t.path" :to="t.path" custom
                      v-slot="{ navigate, isActive }">
@@ -35,13 +39,20 @@ const tabs = computed(() => [
           </span>
         </router-link>
       </nav>
-      <div class="pb-topnav-status" :title="store.wsConnected ? '实时连接正常' : '实时连接断开'">
-        <span class="pb-wsdot" :class="{ ok: store.wsConnected }"></span>
+
+      <div class="pb-topnav-right">
+        <!-- 实时连接指示 -->
+        <div class="pb-topnav-status" :title="store.wsConnected ? '实时通信正常' : '实时连接断开'">
+          <span class="pb-wsdot" :class="{ ok: store.wsConnected }"></span>
+          <span class="pb-wstext">{{ store.wsConnected ? '实时就绪' : '断开' }}</span>
+        </div>
       </div>
     </div>
   </header>
 
-  <router-view />
+  <main class="pb-main-body">
+    <router-view />
+  </main>
 
   <van-tabbar v-if="isMobile" route fixed>
     <van-tabbar-item v-for="t in tabs" :key="t.path" :to="t.path" :icon="t.icon">
@@ -53,30 +64,61 @@ const tabs = computed(() => [
 <style scoped>
 .pb-topnav {
   position: sticky; top: 0; z-index: 100;
-  background: #fff; border-bottom: 1px solid #eef0f3;
-  box-shadow: 0 1px 8px rgba(16,24,40,.04);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
 }
 .pb-topnav-inner {
-  max-width: 1140px; margin: 0 auto; padding: 0 24px;
-  height: 58px; display: flex; align-items: center; gap: 28px;
+  max-width: 1240px; margin: 0 auto; padding: 0 24px;
+  height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
 }
 .pb-brand {
-  font-size: 17px; font-weight: 700; cursor: pointer; display: flex;
-  align-items: center; gap: 6px; color: #1a1a1a; white-space: nowrap;
+  cursor: pointer; display: flex; align-items: center; gap: 10px; user-select: none;
 }
-.pb-brand-icon { font-size: 20px; }
-.pb-brand-sub { font-size: 11px; color: #969799; font-weight: 400; margin-left: 2px; }
-.pb-navlinks { display: flex; gap: 4px; flex: 1; }
+.pb-brand-logo {
+  font-size: 22px; width: 38px; height: 38px;
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  border: 1px solid #bfdbfe;
+  border-radius: 10px; display: flex; align-items: center; justify-content: center;
+}
+.pb-brand-text {
+  font-size: 16px; font-weight: 700; color: #0f172a; line-height: 1.2;
+}
+.pb-brand-sub {
+  font-size: 10px; color: #64748b; font-weight: 500;
+}
+
+.pb-navlinks { display: flex; gap: 6px; }
 .pb-navlink {
-  padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 14px;
-  color: #4b5563; display: inline-flex; align-items: center; gap: 5px;
-  transition: background .15s, color .15s; user-select: none;
+  padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px;
+  font-weight: 500; color: #475569; display: inline-flex; align-items: center; gap: 6px;
+  transition: all 0.15s ease; user-select: none;
 }
-.pb-navlink:hover { background: #f3f4f6; color: #1a1a1a; }
-.pb-navlink.active { background: #e8f1ff; color: var(--pb-primary); font-weight: 600; }
-.pb-topnav-status { display: flex; align-items: center; }
+.pb-navlink:hover { background: #f1f5f9; color: #0f172a; }
+.pb-navlink.active {
+  background: #2563eb; color: #ffffff; font-weight: 600;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.pb-topnav-right {
+  display: flex; align-items: center; gap: 16px;
+}
+
+.pb-topnav-status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: #64748b;
+  background: #f8fafc; padding: 4px 10px; border-radius: 20px; border: 1px solid #e2e8f0;
+}
 .pb-wsdot {
-  width: 9px; height: 9px; border-radius: 50%; background: #ee0a24; display: block;
+  width: 8px; height: 8px; border-radius: 50%; background: #ef4444; display: block;
 }
-.pb-wsdot.ok { background: #07c160; box-shadow: 0 0 0 3px rgba(7,193,96,.15); }
+.pb-wsdot.ok {
+  background: #16a34a; box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.2);
+}
+.pb-wstext { font-weight: 500; }
+
+.pb-main-body {
+  min-height: calc(100vh - 62px);
+}
 </style>
